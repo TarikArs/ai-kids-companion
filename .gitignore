@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.env
+.env.*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+experiments/m0-handwriting-test/photos/*
+!experiments/m0-handwriting-test/photos/.gitkeep
+.DS_Store

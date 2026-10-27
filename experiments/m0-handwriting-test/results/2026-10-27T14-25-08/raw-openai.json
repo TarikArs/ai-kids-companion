@@ -1,0 +1,42 @@
+[
+  {
+    "photo": "photo-01-nombres-en-lettres.jpg",
+    "ms": 71,
+    "error": "fetch failed",
+    "output": {
+      "items": []
+    }
+  },
+  {
+    "photo": "photo-02-dizaines.jpg",
+    "ms": 6,
+    "error": "fetch failed",
+    "output": {
+      "items": []
+    }
+  },
+  {
+    "photo": "photo-03-soustractions-additions.jpg",
+    "ms": 3,
+    "error": "fetch failed",
+    "output": {
+      "items": []
+    }
+  },
+  {
+    "photo": "photo-04-nombre-8.jpg",
+    "ms": 3,
+    "error": "fetch failed",
+    "output": {
+      "items": []
+    }
+  },
+  {
+    "photo": "photo-05-ecriture-chiffres.jpg",
+    "ms": 1,
+    "error": "fetch failed",
+    "output": {
+      "items": []
+    }
+  }
+]

@@ -1,0 +1,407 @@
+{
+  "_readme": "Ground truth for the M0 handwriting test. 'child_answer' = what the child actually wrote (null = not visible in the photo). 'correct_answer' = the right answer. A parent must check every item and set verified=true. Items marked 'stretch' are hard cases scored separately.",
+  "photos": [
+    {
+      "file": "photo-01-nombres-en-lettres.jpg",
+      "title": "Les nombres en lettres (relier)",
+      "task": "matching",
+      "verified": false,
+      "instructions": "The child drew pencil lines linking each number on the left to a word on the right. For each number, say which word its line ends at.",
+      "items": [
+        {
+          "id": "p1-15",
+          "prompt": "15 is linked to which word?",
+          "child_answer": "quinze",
+          "correct_answer": "quinze"
+        },
+        {
+          "id": "p1-24",
+          "prompt": "24 is linked to which word?",
+          "child_answer": "vingt-quatre",
+          "correct_answer": "vingt-quatre"
+        },
+        {
+          "id": "p1-53",
+          "prompt": "53 is linked to which word?",
+          "child_answer": "cinquante-trois",
+          "correct_answer": "cinquante-trois"
+        },
+        {
+          "id": "p1-79",
+          "prompt": "79 is linked to which word?",
+          "child_answer": "soixante-dix-neuf",
+          "correct_answer": "soixante-dix-neuf"
+        },
+        {
+          "id": "p1-91",
+          "prompt": "91 is linked to which word?",
+          "child_answer": "quatre-vingt-onze",
+          "correct_answer": "quatre-vingt-onze"
+        },
+        {
+          "id": "p1-44",
+          "prompt": "44 is linked to which word?",
+          "child_answer": "quarante-quatre",
+          "correct_answer": "quarante-quatre"
+        },
+        {
+          "id": "p1-67",
+          "prompt": "67 is linked to which word?",
+          "child_answer": "soixante-sept",
+          "correct_answer": "soixante-sept"
+        },
+        {
+          "id": "p1-18",
+          "prompt": "18 is linked to which word?",
+          "child_answer": "dix-huit",
+          "correct_answer": "dix-huit"
+        },
+        {
+          "id": "p1-80",
+          "prompt": "80 is linked to which word?",
+          "child_answer": "quatre-vingts",
+          "correct_answer": "quatre-vingts"
+        },
+        {
+          "id": "p1-42",
+          "prompt": "42 is linked to which word?",
+          "child_answer": "quarante-deux",
+          "correct_answer": "quarante-deux"
+        },
+        {
+          "id": "p1-86",
+          "prompt": "86 is linked to which word?",
+          "child_answer": "quatre-vingt-six",
+          "correct_answer": "quatre-vingt-six"
+        },
+        {
+          "id": "p1-31",
+          "prompt": "31 is linked to which word?",
+          "child_answer": "trente-et-un",
+          "correct_answer": "trente-et-un"
+        }
+      ]
+    },
+    {
+      "file": "photo-02-dizaines.jpg",
+      "title": "Copier les dizaines 10 à 100",
+      "task": "copy",
+      "verified": false,
+      "instructions": "The red numbers on the left are the model. The child copied each one 3 times in pencil on the same line. For each line, give the 3 numbers the child wrote, left to right, separated by commas.",
+      "items": [
+        {
+          "id": "p2-10",
+          "prompt": "Line with red model 10: the child's 3 copies",
+          "child_answer": "10,10,10",
+          "correct_answer": "10,10,10"
+        },
+        {
+          "id": "p2-20",
+          "prompt": "Line with red model 20: the child's 3 copies",
+          "child_answer": "20,20,20",
+          "correct_answer": "20,20,20"
+        },
+        {
+          "id": "p2-30",
+          "prompt": "Line with red model 30: the child's 3 copies",
+          "child_answer": "30,30,30",
+          "correct_answer": "30,30,30",
+          "checked_by_parent": true
+        },
+        {
+          "id": "p2-40",
+          "prompt": "Line with red model 40: the child's 3 copies",
+          "child_answer": "40,40,40",
+          "correct_answer": "40,40,40"
+        },
+        {
+          "id": "p2-50",
+          "prompt": "Line with red model 50: the child's 3 copies",
+          "child_answer": "50,50,50",
+          "correct_answer": "50,50,50"
+        },
+        {
+          "id": "p2-60",
+          "prompt": "Line with red model 60: the child's 3 copies",
+          "child_answer": "60,60,60",
+          "correct_answer": "60,60,60",
+          "checked_by_parent": true
+        },
+        {
+          "id": "p2-70",
+          "prompt": "Line with red model 70: the child's 3 copies",
+          "child_answer": "70,70,70",
+          "correct_answer": "70,70,70"
+        },
+        {
+          "id": "p2-80",
+          "prompt": "Line with red model 80: the child's 3 copies",
+          "child_answer": "80,80,80",
+          "correct_answer": "80,80,80"
+        },
+        {
+          "id": "p2-90",
+          "prompt": "Line with red model 90: the child's 3 copies",
+          "child_answer": "90,90,90",
+          "correct_answer": "90,90,90"
+        },
+        {
+          "id": "p2-100",
+          "prompt": "Line with red model 100: the child's 3 copies",
+          "child_answer": "100,100,100",
+          "correct_answer": "100,100,100"
+        }
+      ]
+    },
+    {
+      "file": "photo-03-soustractions-additions.jpg",
+      "title": "Soustractions et additions à trous",
+      "task": "fill_in",
+      "verified": false,
+      "instructions": "Printed math exercises; the child wrote the missing number in pencil on the dotted space. For each item give the number the child wrote. The right edge of the page is cut off: if the child's answer is not visible, answer null.",
+      "items": [
+        {
+          "id": "p3-s1",
+          "prompt": "6 - 2 = ?",
+          "child_answer": "4",
+          "correct_answer": "4"
+        },
+        {
+          "id": "p3-s2",
+          "prompt": "8 - 2 = ?",
+          "child_answer": "6",
+          "correct_answer": "6"
+        },
+        {
+          "id": "p3-s3",
+          "prompt": "7 - 2 = ? (right column)",
+          "child_answer": null,
+          "correct_answer": "5"
+        },
+        {
+          "id": "p3-s4",
+          "prompt": "7 - 3 = ?",
+          "child_answer": "4",
+          "correct_answer": "4"
+        },
+        {
+          "id": "p3-s5",
+          "prompt": "8 - 3 = ?",
+          "child_answer": "5",
+          "correct_answer": "5"
+        },
+        {
+          "id": "p3-s6",
+          "prompt": "6 - 3 = ? (right column)",
+          "child_answer": null,
+          "correct_answer": "3",
+          "checked_by_parent": true
+        },
+        {
+          "id": "p3-s7",
+          "prompt": "7 - 5 = ?",
+          "child_answer": "2",
+          "correct_answer": "2"
+        },
+        {
+          "id": "p3-s8",
+          "prompt": "6 - 4 = ?",
+          "child_answer": "2",
+          "correct_answer": "2"
+        },
+        {
+          "id": "p3-s9",
+          "prompt": "8 - 5 = ? (right column)",
+          "child_answer": null,
+          "correct_answer": "3"
+        },
+        {
+          "id": "p3-a1",
+          "prompt": "3 + ? = 7",
+          "child_answer": "4",
+          "correct_answer": "4"
+        },
+        {
+          "id": "p3-a2",
+          "prompt": "4 + ? = 7",
+          "child_answer": "3",
+          "correct_answer": "3"
+        },
+        {
+          "id": "p3-a3",
+          "prompt": "1 + ? = 7 (right column)",
+          "child_answer": "6",
+          "correct_answer": "6"
+        },
+        {
+          "id": "p3-a4",
+          "prompt": "2 + ? = 7",
+          "child_answer": "5",
+          "correct_answer": "5"
+        },
+        {
+          "id": "p3-a5",
+          "prompt": "5 + ? = 7",
+          "child_answer": "2",
+          "correct_answer": "2"
+        },
+        {
+          "id": "p3-a6",
+          "prompt": "6 + ? = 7 (right column)",
+          "child_answer": "1",
+          "correct_answer": "1"
+        },
+        {
+          "id": "p3-a7",
+          "prompt": "3 + ? = 8",
+          "child_answer": "5",
+          "correct_answer": "5"
+        },
+        {
+          "id": "p3-a8",
+          "prompt": "4 + ? = 8",
+          "child_answer": "4",
+          "correct_answer": "4"
+        },
+        {
+          "id": "p3-a9",
+          "prompt": "1 + ? = 8 (right column)",
+          "child_answer": "7",
+          "correct_answer": "7",
+          "note": "partly cut off"
+        },
+        {
+          "id": "p3-a10",
+          "prompt": "2 + ? = 8",
+          "child_answer": "6",
+          "correct_answer": "6"
+        },
+        {
+          "id": "p3-a11",
+          "prompt": "5 + ? = 8",
+          "child_answer": "3",
+          "correct_answer": "3"
+        },
+        {
+          "id": "p3-a12",
+          "prompt": "6 + ? = 8 (right column)",
+          "child_answer": null,
+          "correct_answer": "2"
+        }
+      ]
+    },
+    {
+      "file": "photo-04-nombre-8.jpg",
+      "title": "Le nombre 8",
+      "task": "mixed",
+      "verified": false,
+      "instructions": "Workbook page. At the bottom, a number line 1 to 7: the child filled the empty boxes in pen. Higher up, the child drew crosses and dots in boxes. Answer each item.",
+      "items": [
+        {
+          "id": "p4-line3",
+          "prompt": "Number line, 3rd box: number written by the child",
+          "child_answer": "3",
+          "correct_answer": "3"
+        },
+        {
+          "id": "p4-line4",
+          "prompt": "Number line, 4th box: number written by the child",
+          "child_answer": "4",
+          "correct_answer": "4"
+        },
+        {
+          "id": "p4-line6",
+          "prompt": "Number line, 6th box: number written by the child",
+          "child_answer": "6",
+          "correct_answer": "6"
+        },
+        {
+          "id": "p4-line7",
+          "prompt": "Number line, 7th box: number written by the child",
+          "child_answer": "7",
+          "correct_answer": "7"
+        },
+        {
+          "id": "p4-teacher4",
+          "prompt": "Is there a red teacher mark on the 4th box of the number line? (yes/no)",
+          "child_answer": "yes",
+          "correct_answer": "yes"
+        },
+        {
+          "id": "p4-cross6",
+          "prompt": "Crosses drawn in the oval above the box '6': how many?",
+          "child_answer": "6",
+          "correct_answer": "6",
+          "stretch": true
+        },
+        {
+          "id": "p4-cross7",
+          "prompt": "Crosses drawn in the oval above the box '7': how many?",
+          "child_answer": "7",
+          "correct_answer": "7",
+          "stretch": true
+        },
+        {
+          "id": "p4-cross8",
+          "prompt": "Crosses drawn in the oval above the box '8': how many?",
+          "child_answer": "8",
+          "correct_answer": "8",
+          "stretch": true
+        },
+        {
+          "id": "p4-dots6",
+          "prompt": "Dots drawn in the box above '6': how many?",
+          "child_answer": "6",
+          "correct_answer": "6",
+          "stretch": true
+        },
+        {
+          "id": "p4-dots7",
+          "prompt": "Dots drawn in the box above '7': how many?",
+          "child_answer": "7",
+          "correct_answer": "7",
+          "stretch": true
+        }
+      ]
+    },
+    {
+      "file": "photo-05-ecriture-chiffres.jpg",
+      "title": "J'écris les chiffres 1 à 5",
+      "task": "teacher_marks",
+      "verified": false,
+      "instructions": "Handwriting practice: each line has a red model digit, then 4 copies by the child in blue. The teacher crossed out some copies with a red line. For each line, list which copies (1-4, left to right) are crossed out in red, comma-separated, or 'none'.",
+      "items": [
+        {
+          "id": "p5-row1",
+          "prompt": "Line of digit 1: copies crossed out in red",
+          "child_answer": "none",
+          "correct_answer": "none"
+        },
+        {
+          "id": "p5-row2",
+          "prompt": "Line of digit 2: copies crossed out in red",
+          "child_answer": "1,2,3,4",
+          "correct_answer": "1,2,3,4"
+        },
+        {
+          "id": "p5-row3",
+          "prompt": "Line of digit 3: copies crossed out in red",
+          "child_answer": "none",
+          "correct_answer": "none"
+        },
+        {
+          "id": "p5-row4",
+          "prompt": "Line of digit 4: copies crossed out in red",
+          "child_answer": "1,2,3,4",
+          "correct_answer": "1,2,3,4"
+        },
+        {
+          "id": "p5-row5",
+          "prompt": "Line of digit 5: copies crossed out in red",
+          "child_answer": "2,3,4",
+          "correct_answer": "2,3,4"
+        }
+      ]
+    }
+  ]
+}
