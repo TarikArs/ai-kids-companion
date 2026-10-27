@@ -1,0 +1,8 @@
+{
+  "name": "homework-companion",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
