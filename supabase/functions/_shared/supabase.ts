@@ -20,3 +20,18 @@ export async function getCaller(req: Request): Promise<User | null> {
   const { data, error } = await client.auth.getUser();
   return error ? null : data.user;
 }
+
+/** True when the user is a parent of the household or one of its paired, non-revoked devices. */
+export async function isHouseholdMember(userId: string, householdId: string): Promise<boolean> {
+  const [{ data: member }, { data: device }] = await Promise.all([
+    admin.from('household_members').select('user_id').eq('household_id', householdId).eq('user_id', userId).maybeSingle(),
+    admin
+      .from('devices')
+      .select('id')
+      .eq('household_id', householdId)
+      .eq('user_id', userId)
+      .is('revoked_at', null)
+      .maybeSingle(),
+  ]);
+  return !!member || !!device;
+}

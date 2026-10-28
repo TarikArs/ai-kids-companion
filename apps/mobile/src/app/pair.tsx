@@ -1,6 +1,9 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 
+import { View } from 'react-native';
+
+import { RoleArt } from '@/components/illustrations';
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
@@ -43,10 +46,13 @@ export default function Pair() {
 
   return (
     <Screen center>
-      <Title>Relier : {label}</Title>
+      <View style={{ alignItems: 'center', gap: 8 }}>
+        <RoleArt name={role === 'board' ? 'board' : 'camera'} size={140} />
+        <Title>Relier : {label}</Title>
+      </View>
       <Card>
         <Body muted>
-          Sur le téléphone du parent : « Ajouter un appareil » puis « {label} ». Tape le code affiché.
+          Dans l’espace parent, appareil « {label} » → « Relier ». Tape le code affiché.
         </Body>
         <Field
           label="Code à 6 chiffres"

@@ -23,7 +23,7 @@ export default function Parent() {
     setError('');
     const { data, error: e } = await supabase
       .from('households')
-      .select('id, name, children(id, name)')
+      .select('id, name, children(id, name, tutor_language, grade)')
       .order('created_at')
       .limit(1)
       .maybeSingle();
@@ -49,7 +49,7 @@ export default function Parent() {
   if (!signedInParent) return <SignIn onBack={changeRole} />;
   if (household === undefined) return <Loading error={error} onRetry={loadHousehold} />;
   if (household === null) return <Setup onDone={loadHousehold} />;
-  return <ParentHome household={household} onSignOut={signOut} />;
+  return <ParentHome household={household} onSignOut={signOut} onChanged={loadHousehold} />;
 }
 
 function Loading({ error, onRetry }: { error?: string; onRetry?: () => void }) {

@@ -15,6 +15,9 @@ interface AppStore {
   role: AppRole | null;
   /** Set once a Board or Camera has been paired with a household. */
   device: PairedDevice | null;
+  /** Board: text only, no voice at all. */
+  muted: boolean;
+  setMuted: (muted: boolean) => void;
   setRole: (role: AppRole | null) => void;
   setDevice: (device: PairedDevice | null) => void;
   reset: () => void;
@@ -26,6 +29,8 @@ export const useAppStore = create<AppStore>()(
       hydrated: false,
       role: null,
       device: null,
+      muted: false,
+      setMuted: (muted) => set({ muted }),
       setRole: (role) => set({ role }),
       setDevice: (device) => set({ device }),
       reset: () => set({ role: null, device: null }),
@@ -33,7 +38,7 @@ export const useAppStore = create<AppStore>()(
     {
       name: 'kids-companion-app',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: ({ role, device }) => ({ role, device }),
+      partialize: ({ role, device, muted }) => ({ role, device, muted }),
       onRehydrateStorage: () => () => useAppStore.setState({ hydrated: true }),
     },
   ),

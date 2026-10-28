@@ -6,6 +6,9 @@
 // POST { action: "claim", code, name? }
 //   Caller: the device, signed in anonymously. Links it to the household.
 //   Returns { device_id, household_id, role }.
+//
+// Rule: ONE Camera per household. A second one is refused (409 camera_exists) when the code is created and when it is
+// claimed; the parent removes the old Camera first. Several Boards are allowed.
 
 import { admin, getCaller } from '../_shared/supabase.ts';
 import { corsHeaders, json } from '../_shared/cors.ts';
@@ -13,6 +16,15 @@ import { corsHeaders, json } from '../_shared/cors.ts';
 const ROLES = ['board', 'camera'] as const;
 type Role = (typeof ROLES)[number];
 const CODE_TTL_MINUTES = 10;
+const CAMERA_EXISTS = 'Une caméra est déjà reliée. Retire-la d’abord dans l’espace parent.';
+
+/** Active Camera of the household, other than this user (a phone re-pairing itself is fine). */
+async function otherCamera(householdId: string, userId?: string) {
+  let q = admin.from('devices').select('id').eq('household_id', householdId).eq('role', 'camera').is('revoked_at', null);
+  if (userId) q = q.neq('user_id', userId);
+  const { data } = await q.limit(1).maybeSingle();
+  return data;
+}
 
 function newCode(): string {
   const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
@@ -30,6 +42,11 @@ async function createCode(userId: string, householdId: unknown, role: unknown) {
     .eq('user_id', userId)
     .maybeSingle();
   if (!member) return json({ error: 'Only a parent of this household can add a device' }, 403);
+  if (role === 'camera') {
+    if (await otherCamera(householdId)) return json({ error: CAMERA_EXISTS, code: 'camera_exists' }, 409);
+    // Older unused Camera codes: only the newest one stays valid.
+    await admin.from('pairing_codes').delete().eq('household_id', householdId).eq('role', 'camera').is('used_at', null);
+  }
 
   const expiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60_000).toISOString();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -65,6 +82,9 @@ async function claimCode(userId: string, code: unknown, name: unknown) {
     .maybeSingle();
   if (error) return json({ error: error.message }, 500);
   if (!claimed) return json({ error: 'Code is wrong, expired or already used' }, 404);
+  if (claimed.role === 'camera' && (await otherCamera(claimed.household_id, userId))) {
+    return json({ error: CAMERA_EXISTS, code: 'camera_exists' }, 409);
+  }
 
   const { data: device, error: devErr } = await admin
     .from('devices')
@@ -81,7 +101,10 @@ async function claimCode(userId: string, code: unknown, name: unknown) {
     )
     .select('id, household_id, role')
     .single();
-  if (devErr) return json({ error: devErr.message }, 500);
+  if (devErr) {
+    if (devErr.code === '23505') return json({ error: CAMERA_EXISTS, code: 'camera_exists' }, 409); // DB guard (race)
+    return json({ error: devErr.message }, 500);
+  }
 
   return json({ device_id: device.id, household_id: device.household_id, role: device.role });
 }

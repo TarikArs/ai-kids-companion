@@ -8,7 +8,8 @@
     "scheme": "kidscompanion",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.tarikars.kidscompanion"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +18,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.tarikars.kidscompanion"
     },
     "web": {
       "output": "single",
@@ -36,9 +38,17 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "La caméra photographie le cahier pour aider pendant les devoirs.",
-          "microphonePermission": false,
-          "recordAudioAndroid": false
+          "cameraPermission": "La caméra photographie le cahier pour aider pendant les devoirs."
+        }
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Le micro permet à l’enfant de lire à voix haute et de poser des questions à Silia."
         }
       ]
     ],

@@ -52,11 +52,13 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'light';
   loading?: boolean;
   disabled?: boolean;
 }) {
   const primary = variant === 'primary';
+  const light = variant === 'light';
+  const textColor = primary || light ? colors.onAccent : colors.text;
   return (
     <Pressable
       accessibilityRole="button"
@@ -64,15 +66,15 @@ export function Button({
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.button,
-        primary ? styles.buttonPrimary : variant === 'secondary' ? styles.buttonSecondary : styles.buttonGhost,
+        primary ? styles.buttonPrimary : light ? styles.buttonLight : variant === 'secondary' ? styles.buttonSecondary : styles.buttonGhost,
         (disabled || loading) && { opacity: 0.5 },
         pressed && { transform: [{ scale: 0.98 }] },
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={primary ? colors.onAccent : colors.text} />
+        <ActivityIndicator color={textColor} />
       ) : (
-        <Text style={[styles.buttonText, { color: primary ? colors.onAccent : colors.text }]}>{label}</Text>
+        <Text style={[styles.buttonText, { color: textColor }]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -105,6 +107,7 @@ const styles = StyleSheet.create({
   },
   buttonPrimary: { backgroundColor: colors.accent },
   buttonSecondary: { backgroundColor: colors.surfaceHigh },
+  buttonLight: { backgroundColor: '#FFFFFF' },
   buttonGhost: { backgroundColor: 'transparent' },
   buttonText: { fontSize: 18, fontWeight: '800' },
   label: { color: colors.muted, fontSize: 15, fontWeight: '700' },
