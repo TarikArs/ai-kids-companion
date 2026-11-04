@@ -1,6 +1,7 @@
 import type { ExerciseChoice, ExerciseFocus, HelpAction } from '@hc/shared';
 
 import { log } from './log';
+import { newTurn } from './session';
 import { functionError, supabase } from './supabase';
 
 /** Active exercise of the session (null if none, or the column is not there yet). */
@@ -24,7 +25,7 @@ export const ACTION_LABEL: Record<HelpAction, string> = { explain: 'Expliquer', 
  */
 export async function requestHelp(
   sessionId: string,
-  opts: { choice?: ExerciseChoice; action?: HelpAction | 'choose' } = {},
+  opts: { choice?: ExerciseChoice; action?: HelpAction | 'choose'; turn?: { id: string; priority: 'child' | 'auto' } } = {},
 ): Promise<{ data: any; error: string | null }> {
   log('exercise', `help: ${opts.choice ? `tap exercise ${exerciseName(opts.choice)}` : ''}${opts.action ? ` action ${opts.action}` : ''}` || 'help: explain');
   const { data, error } = await supabase.functions.invoke('explain-exercise', {
@@ -32,6 +33,7 @@ export async function requestHelp(
       session_id: sessionId,
       ...(opts.choice ? { exercise_index: opts.choice.index } : {}),
       ...(opts.action ? { action: opts.action } : {}),
+      turn: opts.turn ?? newTurn('child'),
     },
   });
   return { data, error: error ? await functionError(error) : null };

@@ -11,7 +11,10 @@
 import { encodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 import { evalExpression, expectedAnswer, formatAnswer, ownCalculationSlip, sameAnswer } from '../_shared/arithmetic.ts';
-import { broadcast } from '../_shared/broadcast.ts';
+import { introFor, pickIntro, regionOf, type PageExerciseLite } from '../_shared/intro.ts';
+import type { PageContext } from '../_shared/page.ts';
+import { activate, BREAK_SECONDS, doneText, finishActive, loadPlan, planFromDiary, planText, savePlan, subjectOf, type Subject } from '../_shared/plan.ts';
+import { broadcast, parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { corsHeaders, json } from '../_shared/cors.ts';
 import { CHECK_TEXT, gradeLabel, PHRASES, SPEAKING_STYLE, tutorLang, type Lang } from '../_shared/language.ts';
 import { makeLog } from '../_shared/log.ts';
@@ -49,6 +52,12 @@ interface ReadItem {
   hint?: string;
   solution?: string;
   solutionConfidence?: number;
+  /** Position of its exercise on the page (1, 2, 3…). */
+  ex?: number;
+  /** Open answers (not arithmetic): the model's own check against the page, its confidence, and why (never shown). */
+  okModel?: boolean | null;
+  okConf?: number;
+  why?: string;
 }
 
 interface Reading {
@@ -57,15 +66,26 @@ interface Reading {
   hand_blocking: boolean;
   language?: string;
   items: ReadItem[];
+  exercises: PageExerciseLite[];
+  /** Subject of the page. */
+  subject: Subject;
+  /** The photo shows the homework diary (list of tasks), not an exercise page. */
+  diary: boolean;
+  tasks: { s?: string; d?: string }[];
 }
 
 // Compact keys keep the model's output short: output tokens are the main cost in time.
 const promptFor = (grade: string) => `Photo of homework by a child in ${grade}. READ what the child wrote; do not correct.
 Return JSON only, compact:
-{"rot":0,"v":true,"h":false,"lang":"fr","i":[{"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
+{"rot":0,"v":true,"h":false,"lang":"fr","sub":"math","dy":false,"e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
 rot: how many degrees the photo must be turned CLOCKWISE so the printed text reads upright (0, 90, 180 or 270).
 v: a homework page is visible. h: a hand or object covers answers.
-i: every item where the child must write. k: the exercise as printed with ? for the blank.
+sub: the subject of the page: math|french|arabic|english|science|islamic|social|other.
+dy: true when the photo shows a homework diary or a list of tasks to do (cahier de textes), not an exercise page; then add
+tk = [{"s":"math","d":"Maths page 42"}]: s = subject code as above, d = the task as a short label in the diary's language.
+e: the separate exercises in reading order, EVEN EMPTY ONES: n = position 1, 2, 3…; lb = the number printed on the page
+("" if none); ti = short title in the page's language; in = the printed instruction (max 20 words); r = the exercise's box.
+i: every item where the child must write, empty ones too (a = null); e = the n of its exercise. k: the exercise as printed with ? for the blank.
 t: fill_in|number_line|word_problem|matching|copy|counting|other.
 a: COPY the child's handwriting digit by digit, exactly as written, even if it is wrong or unfinished. Never write what the
 answer should be, never correct it, never complete it. Faint pencil: give your best reading and a LOWER confidence c.
@@ -75,11 +95,19 @@ For math items that are not a simple "a op b = ?" (word problems, multi-step), a
 x: the calculation that gives the CORRECT answer from the numbers on the page, using only digits, + - * / ( ) and ceil/floor/round
 (e.g. bus of 46 seats, 748 people, how many trips -> "ceil(748/46)"), and xc: your confidence 0-1 that x is the right calculation.
 Do not write the result itself, only the calculation.
+For answers that are NOT arithmetic (a word, a sentence, a reading question, matching, copying), also judge them against
+the page: ok = true (right) / false (wrong) / null (cannot tell), okc = your confidence 0-1 in ok, and when ok is false,
+w = a short English note for the teacher saying where on the page the right answer is (never shown to the child).
+Skip ok for arithmetic: it is checked elsewhere.
 The photo may be sideways or upside down: read it in any orientation. r is always in THIS photo's coordinates, as it is.
 If the child wrote a whole calculation (e.g. "120 - 80 + 10 = 300"), a = everything she wrote, including her result.
 Arabic, French and English pages are all possible; Arabic digits are fine.`;
 
 interface CompactItem {
+  e?: number;
+  ok?: boolean | null;
+  okc?: number;
+  w?: string;
   k: string;
   t?: string;
   a?: string | null;
@@ -123,14 +151,44 @@ async function readPage(imageB64: string, grade: string): Promise<{ reading: Rea
     region: Array.isArray(it.r) && it.r.length === 4 ? { x: it.r[0], y: it.r[1], w: it.r[2], h: it.r[3] } : undefined,
     solution: typeof it.x === 'string' ? it.x : undefined,
     solutionConfidence: Number(it.xc ?? 0),
+    ex: typeof it.e === 'number' ? it.e : undefined,
+    okModel: typeof it.ok === 'boolean' ? it.ok : null,
+    okConf: Number(it.okc ?? 0),
+    why: typeof it.w === 'string' ? it.w.slice(0, 200) : undefined,
   }));
+  const exercises: PageExerciseLite[] = (Array.isArray(raw.e) ? raw.e : [])
+    .slice(0, 12)
+    .map((e: { n?: number; lb?: string; ti?: string; in?: string; r?: number[] }, i: number) => {
+      const label = String(e.lb ?? '').trim();
+      const box = clampRegion(Array.isArray(e.r) && e.r.length === 4 ? { x: e.r[0], y: e.r[1], w: e.r[2], h: e.r[3] } : undefined);
+      return {
+        n: typeof e.n === 'number' ? e.n : i + 1,
+        ...(label && label !== String(i + 1) ? { label } : {}),
+        title: String(e.ti ?? '').slice(0, 80),
+        instr: String(e.in ?? '').slice(0, 200),
+        ...(box ? { r: box } : {}),
+      };
+    });
   const rot = [90, 180, 270].includes(Number(raw.rot)) ? (Number(raw.rot) as 90 | 180 | 270) : 0;
-  const reading: Reading = { page_visible: raw.v !== false, hand_blocking: raw.h === true, language: raw.lang, items, rot };
+  const reading: Reading = {
+    page_visible: raw.v !== false,
+    hand_blocking: raw.h === true,
+    language: raw.lang,
+    items,
+    exercises,
+    rot,
+    subject: subjectOf(raw.sub),
+    diary: raw.dy === true,
+    tasks: Array.isArray(raw.tk) ? raw.tk : [],
+  };
   return { reading, usage: body.usage };
 }
 
 /** One short hint for a wrong answer. Text-only call: fast and cheap. */
-async function writeHint(exercise: string, childAnswer: string, expected: string, language: Lang, grade: string): Promise<string | null> {
+async function writeHint(exercise: string, childAnswer: string, expected: string, language: Lang, grade: string, note?: string): Promise<string | null> {
+  const noteText = note
+    ? ` Teacher's note (NEVER say it, it contains the answer): ${note}. Send her back to that place on the page, without giving the answer.`
+    : '';
   // Her own calculation does not give the number she wrote: the hint points at that step.
   const slip = ownCalculationSlip(childAnswer);
   const slipNote = slip
@@ -147,7 +205,7 @@ async function writeHint(exercise: string, childAnswer: string, expected: string
         messages: [
           {
             role: 'user',
-            content: `You are Silia, her kind teacher. A girl in ${grade} wrote "${childAnswer}" for "${exercise}", which is not right.${slipNote} Think about the likely mistake (wrong operation, forgot a remainder, counting slip…), then write ONE short, kind hint in ${SPEAKING_STYLE[language]} (max 16 words), at her level, that helps her find it herself. Never give the answer, never say she is wrong. Reply with the hint only.`,
+            content: `You are Silia, her kind teacher. A girl in ${grade} wrote "${childAnswer}" for "${exercise}", which is not right.${slipNote}${noteText} Think about the likely mistake (wrong operation, forgot a remainder, counting slip…), then write ONE short, kind hint in ${SPEAKING_STYLE[language]} (max 16 words), at her level, that helps her find it herself. Never give the answer, never say she is wrong. Reply with the hint only.`,
           },
         ],
       }),
@@ -187,6 +245,7 @@ Deno.serve(async (req) => {
   const log = makeLog('analyze-snapshot');
   const body = await req.json().catch(() => ({}));
   const { snapshot_id, image_b64, mode } = body as { snapshot_id?: unknown; image_b64?: unknown; mode?: unknown };
+  const turn = parseTurn((body as { turn?: unknown }).turn);
   const checkAll = mode === 'check';
   if (typeof snapshot_id !== 'string') return json({ error: 'snapshot_id is required' }, 400);
 
@@ -210,6 +269,7 @@ Deno.serve(async (req) => {
   if (snap.status !== 'uploaded' && !checkAll) return json({ status: snap.status, note: 'already processed' });
 
   const topic = `session:${snap.session_id}`;
+  const send = turnSender(topic, turn);
   const started = Date.now();
   const t: Record<string, number> = {};
   let last = started;
@@ -218,7 +278,7 @@ Deno.serve(async (req) => {
     t[name] = now - last;
     last = now;
   };
-  broadcast(topic, 'tutor.thinking', { snapshot_id: snap.id }); // not awaited: no need to wait for it
+  send('tutor.thinking', { snapshot_id: snap.id }); // not awaited: no need to wait for it
 
   try {
     let b64: string;
@@ -237,20 +297,22 @@ Deno.serve(async (req) => {
       .select('item_id, observed_answer')
       .eq('session_id', snap.session_id)
       .order('created_at', { ascending: true });
-    const [{ reading, usage }, { data: previous }, sincePraise, sinceEncourage] = await Promise.all([
+    const [{ reading, usage }, { data: previous }, sincePraise, sinceEncourage, sessionRot] = await Promise.all([
       readPage(b64, grade),
       previousQuery,
       secondsSinceLast(snap.session_id, 'praise'),
       secondsSinceLast(snap.session_id, 'encourage'),
+      admin.from('homework_sessions').select('rotation, focus').eq('id', snap.session_id).maybeSingle(),
     ]);
     lap('vision_ms');
 
-    // Sideways or upside-down photo (phone lying flat): no image work here (Edge CPU limit). Store the angle; the Board turns it.
-    if (reading.rot) {
-      log('rotated', { by: reading.rot });
-      await admin.from('snapshots').update({ rotation: reading.rot }).eq('id', snap.id);
-      broadcast(topic, 'snapshot.rotation', { snapshot_id: snap.id, rotation: reading.rot });
-    }
+    // Orientation is decided ONCE per session (the phone stays on its stand): the first readable photo sets it,
+    // later guesses never flip the page on the Board. The Board's rotate button can correct it.
+    if (!sessionRot.error && sessionRot.data && sessionRot.data.rotation === null && reading.page_visible) {
+      await admin.from('homework_sessions').update({ rotation: reading.rot }).eq('id', snap.session_id);
+      send('session.rotation', { rotation: reading.rot });
+      log('session rotation set', { rotation: reading.rot });
+    } else if (reading.rot) log('rotation guess ignored (session already set)', { guess: reading.rot, session: sessionRot.data?.rotation });
 
     log('vision', {
       page_visible: reading.page_visible,
@@ -265,20 +327,68 @@ Deno.serve(async (req) => {
       const lang = tutorLang(childSetting, reading.language);
       const text = { fr: 'Je ne vois pas bien la page. Montre-moi le cahier, puis appuie sur Corriger.', ar: 'ما كنشوفش الصفحة مزيان. ورّيني الكونّاش، ومن بعد ورّكي على صحّح.', fus: 'لا أرى الصفحة جيدًا. أريني الدفتر، ثم اضغطي على صحّح.', en: 'I can’t see the page well. Show me the notebook, then press Check.' }[lang];
       const audioUrl = await speechUrl(text, lang);
-      broadcast(topic, 'snapshot.rejected', { snapshot_id: snap.id, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
-      await broadcast(topic, 'tutor.say', { message_id: crypto.randomUUID(), kind: 'encourage', text, language: lang, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
+      send('snapshot.rejected', { snapshot_id: snap.id, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
+      await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'encourage', text, language: lang, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
       inBackground(Promise.resolve(admin.from('snapshots').update({ status: 'skipped' }).eq('id', snap.id)));
       return json({ action: 'encourage', text, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
     }
     if (!reading.page_visible || reading.hand_blocking) {
       inBackground(Promise.resolve(admin.from('snapshots').update({ status: 'skipped' }).eq('id', snap.id)));
-      broadcast(topic, 'snapshot.rejected', { snapshot_id: snap.id, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
-      broadcast(topic, 'tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
+      send('analysis.done', { snapshot_id: snap.id, read: 0, new: 0, right: 0, wrong: 0, quiet: true, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
+      send('snapshot.rejected', { snapshot_id: snap.id, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
+      send('tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
       return json({ action: 'silent', reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
     }
 
     const language = tutorLang(childSetting, reading.language);
     const phrases = PHRASES[language];
+
+    // ONE page model per photo, shared by every feature (Explique, voice, Corriger): no second reading of the page.
+    const pageModel: PageContext = {
+      lang: reading.language ?? 'fr',
+      readable: true,
+      text: '', // printed text: read later, only if she reads aloud (page.ts pageText)
+      exercises: reading.exercises.map((e) => {
+        const mine = reading.items.filter((i) => i.ex === e.n);
+        const filled = mine.filter((i) => i.child_answer).length;
+        return {
+          n: e.n,
+          ...(e.label ? { label: e.label } : {}),
+          title: e.title,
+          instr: e.instr,
+          s: filled === 0 ? 'empty' : filled === mine.length ? 'done' : 'partial',
+          r: e.r ?? regionOf(e.n, reading.items),
+          items: mine.map((i) => ({ q: i.key, a: i.child_answer, c: i.confidence })),
+        };
+      }),
+    };
+    inBackground(Promise.resolve(admin.from('snapshots').update({ exercises: pageModel, page_lang: pageModel.lang }).eq('id', snap.id)));
+
+    // The evening's plan. A homework diary: read the tasks, propose an order (once, while nothing is done yet).
+    let plan = await loadPlan(snap.session_id);
+    if (reading.diary && reading.tasks.length && !checkAll && !plan?.items.some((i) => i.status === 'done')) {
+      const diaryPlan = planFromDiary(reading.tasks, snap.id);
+      if (diaryPlan && (await savePlan(snap.session_id, diaryPlan))) {
+        send('plan.changed', { plan: diaryPlan });
+        const text = planText(language, diaryPlan);
+        const audioUrl = await speechUrl(text, language);
+        const messageId = crypto.randomUUID();
+        await send('tutor.say', { message_id: messageId, kind: 'explain', text, language, ...(audioUrl ? { audio_url: audioUrl } : {}), snapshot_id: snap.id, annotations: [] });
+        send('analysis.done', { snapshot_id: snap.id, read: 0, new: 0, right: 0, wrong: 0, quiet: false });
+        log('plan from diary', { items: diaryPlan.items.map((i) => `${i.subject}: ${i.label}`) });
+        inBackground(
+          Promise.all([
+            admin.from('snapshots').update({ status: 'analyzed' }).eq('id', snap.id),
+            admin.from('tutor_messages').insert({ id: messageId, household_id: snap.household_id, session_id: snap.session_id, kind: 'explain', text, language, annotations: [] }),
+          ]),
+        );
+        return json({ action: 'plan', plan: diaryPlan, text, ms: Date.now() - started });
+      }
+    }
+    // She opened a page of another subject: it becomes the active one in the plan.
+    if (plan && !reading.diary && reading.subject !== 'other' && activate(plan, reading.subject)) {
+      if (await savePlan(snap.session_id, plan)) send('plan.changed', { plan });
+    }
 
     // Latest observed answer per item in this session.
     const lastSeen = new Map<string, string | null>();
@@ -302,13 +412,21 @@ Deno.serve(async (req) => {
       if (isCorrect === true && digitCount(expected!) >= 4 && (i.confidence ?? 0) < PRAISE_CONFIDENCE_LONG) {
         isCorrect = null; // not sure enough to praise a long answer: stay quiet
       }
-      return { ...i, expected, isCorrect };
+      // Open answers (a word, a sentence, a reading question): checked by meaning against the page.
+      // "Wrong" only when the model is very sure: a false "wrong" hurts more than a missed one.
+      let checkedBy: 'code' | 'meaning' | null = isCorrect === null ? null : 'code';
+      if (expected === null && !CHECKABLE_TYPES.has(i.type) && i.okModel !== null && i.okModel !== undefined) {
+        if (i.okModel === false && (i.okConf ?? 0) >= 0.9) isCorrect = false;
+        else if (i.okModel === true && (i.okConf ?? 0) >= 0.8) isCorrect = true;
+        if (isCorrect !== null) checkedBy = 'meaning';
+      }
+      return { ...i, expected, isCorrect, checkedBy };
     });
 
     log('judged', {
       language,
       already_seen: reading.items.length - fresh.length,
-      new: judged.map((i) => ({ k: i.key, a: i.child_answer, expected: i.expected, correct: i.isCorrect, c: i.confidence, slip: ownCalculationSlip(i.child_answer) })),
+      new: judged.map((i) => ({ k: i.key, a: i.child_answer, expected: i.expected, correct: i.isCorrect, by: i.checkedBy, c: i.confidence, why: i.why, slip: ownCalculationSlip(i.child_answer) })),
     });
     const wrong = judged.filter((i) => i.isCorrect === false);
     const right = judged.filter((i) => i.isCorrect === true);
@@ -317,15 +435,38 @@ Deno.serve(async (req) => {
       .filter((i) => i.region)
       .map((i) => ({ shape: 'tick', region: i.region, color: '#5BD68A' }));
 
-    let kind: 'hint' | 'praise' | 'encourage' | null = null;
+    // The whole page is answered with no mistake and something new was just written: this subject is finished.
+    // Bravo, a one-minute break, then the next subject of the plan. Once per page.
+    let pageDone: { text: string; key: string } | null = null;
+    if (plan && !checkAll && judged.length && !wrong.length && reading.items.length && reading.items.every((i) => i.child_answer)) {
+      const key = `page_done:${reading.exercises.map((e) => e.title).join('|').toLowerCase().slice(0, 120)}`;
+      const { data: said, error: saidErr } = await admin.from('tutor_messages').select('id').eq('session_id', snap.session_id).eq('action', key).limit(1);
+      const fin = !saidErr && !said?.length ? finishActive(plan) : null;
+      if (fin && (await savePlan(snap.session_id, plan))) {
+        send('plan.changed', { plan });
+        if (fin.next) send('session.break', { seconds: BREAK_SECONDS, next: fin.next.label, language });
+        pageDone = { text: doneText(language, fin.done.label, fin.next?.label ?? null), key };
+        log('subject done', { done: fin.done.label, next: fin.next?.label ?? null });
+      }
+    }
+
+    let kind: 'hint' | 'praise' | 'encourage' | 'explain' | null = null;
     let text = '';
     let familiar = true; // familiar phrase = already generated, played from the cache
     let annotations: unknown[] = [];
 
+    // An empty exercise she is about to start: introduce it, like a teacher (once per exercise). Not over a mistake.
+    const introPick = !checkAll && !wrong.length && !pageDone ? await pickIntro(snap.session_id, reading.exercises, reading.items) : null;
+    const intro = introPick ? { ...introPick, text: await introFor(introPick.exercise, reading.items, language, grade, MODEL) } : null;
+    if (intro) {
+      lap('intro_ms');
+      log('intro', { exercise: intro.exercise.n, title: intro.exercise.title, text: intro.text });
+    }
+
     if (wrong.length) {
       const w = wrong[0];
       kind = 'hint';
-      const written = await writeHint(w.key, w.child_answer, w.expected ?? '', language, grade);
+      const written = await writeHint(w.key, w.child_answer, w.expected ?? '', language, grade, w.why);
       familiar = !written;
       text = written || pick(phrases.hint);
       lap('hint_ms');
@@ -349,6 +490,28 @@ Deno.serve(async (req) => {
         kind = 'encourage';
         text = CHECK_TEXT[language].noAnswer;
       }
+    } else if (pageDone) {
+      kind = 'praise';
+      familiar = false;
+      text = pageDone.text;
+      annotations = ticks;
+    } else if (intro) {
+      kind = 'explain';
+      familiar = false;
+      // Just finished the previous exercise: a short bravo first, then the next one.
+      text = `${right.length ? `${pick(phrases.praise)} ` : ''}${intro.text}`;
+      annotations = [...(intro.region ? [{ shape: 'text', region: intro.region, text: intro.exercise.label ?? String(intro.exercise.n), color: '#7FD3FF' }] : []), ...ticks];
+      // The introduced exercise becomes the active one (voice "explique-le" and the Board frame follow it).
+      const focus = {
+        index: intro.exercise.n,
+        title: intro.exercise.title,
+        ...(intro.exercise.label ? { label: intro.exercise.label } : {}),
+        ...(intro.region ? { region: intro.region } : {}),
+        snapshot_id: snap.id,
+        at: new Date().toISOString(),
+      };
+      const { error: fe } = await admin.from('homework_sessions').update({ focus, pending_action: null }).eq('id', snap.session_id);
+      if (!fe) send('focus.changed', { focus, by: 'auto' });
     } else if (right.length && sincePraise > PRAISE_COOLDOWN_S) {
       kind = 'praise';
       text = pick(phrases.praise);
@@ -358,7 +521,59 @@ Deno.serve(async (req) => {
       text = pick(phrases.encourage);
     }
 
-    log('decision', { kind: kind ?? 'silent', text, familiar });
+    // Why Silia stays quiet: shown on the Board and the Camera so it never looks frozen.
+    const written = reading.items.filter((i) => i.child_answer !== null && i.child_answer !== '');
+    const unsure = written.filter((i) => (i.confidence ?? 0) < THRESHOLD);
+    let quietReason: 'nothing_new' | 'unsure' | 'no_answers' | 'not_checkable' | 'cooldown' | undefined;
+    if (!kind) {
+      if (!written.length) quietReason = 'no_answers';
+      else if (!fresh.length && unsure.length) quietReason = 'unsure';
+      else if (!fresh.length) quietReason = 'nothing_new';
+      else if (right.length) quietReason = 'cooldown';
+      else quietReason = 'not_checkable';
+    }
+    // Answers written but unreadable, nothing else to say: tell her (not more than every 2 minutes).
+    if (quietReason === 'unsure' && sinceEncourage > ENCOURAGE_COOLDOWN_S) {
+      kind = 'encourage';
+      text = CHECK_TEXT[language].unsure;
+      familiar = false;
+      quietReason = undefined;
+    }
+    send('analysis.done', {
+      snapshot_id: snap.id,
+      read: written.length,
+      new: judged.length,
+      right: right.length,
+      wrong: wrong.length,
+      quiet: !kind,
+      ...(quietReason ? { reason: quietReason } : {}),
+    });
+
+    // Auto-advance: the active exercise is finished with no mistake -> the next one becomes active (like a teacher
+    // moving on). An introduced exercise already became active above.
+    const current = sessionRot.data?.focus as { index?: number } | null | undefined;
+    if (!intro && !checkAll && typeof current?.index === 'number') {
+      const mine = reading.items.filter((i) => i.ex === current.index);
+      const finished = mine.length > 0 && mine.every((i) => i.child_answer) && !wrong.some((w) => w.ex === current.index);
+      const next = finished ? [...reading.exercises].sort((a, b) => a.n - b.n).find((e) => e.n > current.index!) : undefined;
+      if (next) {
+        const focus = {
+          index: next.n,
+          title: next.title,
+          ...(next.label ? { label: next.label } : {}),
+          ...((next.r ?? regionOf(next.n, reading.items)) ? { region: next.r ?? regionOf(next.n, reading.items) } : {}),
+          snapshot_id: snap.id,
+          at: new Date().toISOString(),
+        };
+        const { error: fe } = await admin.from('homework_sessions').update({ focus, pending_action: null }).eq('id', snap.session_id);
+        if (!fe) {
+          send('focus.changed', { focus, by: 'auto' });
+          log('auto-advance', { from: current.index, to: next.n });
+        }
+      }
+    }
+
+    log('decision', { kind: kind ?? 'silent', text, familiar, quiet_reason: quietReason, unsure: unsure.length });
     // Fast path: voice, then tell the Board. Saving happens after the response, in the background.
     const messageId = crypto.randomUUID();
     if (kind) {
@@ -366,7 +581,7 @@ Deno.serve(async (req) => {
       const phrase = familiar ? await phrasePath(text, language) : null;
       const audioUrl = familiar ? null : await speechUrl(text, language);
       lap('tts_ms');
-      await broadcast(topic, 'tutor.say', {
+      await send('tutor.say', {
         message_id: messageId,
         kind,
         text,
@@ -377,9 +592,9 @@ Deno.serve(async (req) => {
         annotations,
       });
     } else if (ticks.length) {
-      await broadcast(topic, 'board.annotate', { snapshot_id: snap.id, annotations: ticks });
+      await send('board.annotate', { snapshot_id: snap.id, annotations: ticks });
     } else {
-      broadcast(topic, 'tutor.say', { message_id: messageId, kind: 'system', text: '', language, annotations: [] }); // stop "thinking"
+      send('tutor.say', { message_id: messageId, kind: 'system', text: '', language, annotations: [] }); // stop "thinking"
     }
     lap('broadcast_ms');
 
@@ -403,16 +618,18 @@ Deno.serve(async (req) => {
           );
         }
         if (kind) {
+          const row = { id: messageId, household_id: snap.household_id, session_id: snap.session_id, kind, text, language, annotations };
+          const extra =
+            intro && kind === 'explain'
+              ? { action: intro.key, exercise_index: intro.exercise.n }
+              : pageDone && kind === 'praise'
+                ? { action: pageDone.key }
+                : {};
           writes.push(
-            admin.from('tutor_messages').insert({
-              id: messageId,
-              household_id: snap.household_id,
-              session_id: snap.session_id,
-              kind,
-              text,
-              language,
-              annotations,
-            }),
+            (async () => {
+              const res = await admin.from('tutor_messages').insert({ ...row, ...extra });
+              return res.error && Object.keys(extra).length ? await admin.from('tutor_messages').insert(row) : res;
+            })(),
           );
         }
         const results = await Promise.all(writes);
@@ -421,6 +638,8 @@ Deno.serve(async (req) => {
     );
     lap('save_ms');
     const result = {
+      quiet_reason: quietReason,
+      read: written.length,
       action: kind ?? 'silent',
       text,
       new_items: judged.length,
@@ -436,7 +655,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error(e);
     await admin.from('snapshots').update({ status: 'failed' }).eq('id', snap.id);
-    await broadcast(topic, 'tutor.say', {
+    await send('tutor.say', {
       message_id: crypto.randomUUID(),
       kind: 'system',
       text: '',

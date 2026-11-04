@@ -1,14 +1,16 @@
-import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction } from '@hc/shared';
+import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction, SessionEvents, SessionPlan, TurnRef } from '@hc/shared';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui';
 import { AnnotatedPhoto } from '@/features/board/annotated-photo';
 import { Avatar, type AvatarMood, type AvatarReaction } from '@/features/board/avatar';
-import { findOpenSession, onEvent, sendEvent, sessionChannel, type HomeworkSession } from '@/lib/session';
+import { findOpenSession, newTurn, onEvent, sendEvent, sessionChannel, type HomeworkSession } from '@/lib/session';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
@@ -17,7 +19,7 @@ import { log } from '@/lib/log';
 import { ACTION_LABEL, exerciseName, loadFocus, requestHelp } from '@/lib/exercise';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { loadPhrases, pickPhrase } from '@/lib/phrases';
-import { playVoice, stopVoice } from '@/lib/voice';
+import { onVoiceIssue, playVoice, stopVoice } from '@/lib/voice';
 
 interface Photo {
   id: string;
@@ -28,6 +30,42 @@ interface Photo {
 }
 
 const GREETING = `Bonjour ! Je suis ${TUTOR_NAME}. Montre-moi ton cahier.`;
+
+const QUIET: Record<string, string> = {
+  nothing_new: 'rien de nouveau',
+  unsure: 'écriture difficile à lire',
+  no_answers: 'pas encore de réponse',
+  not_checkable: 'je regarde, pas de calcul à vérifier',
+  cooldown: 'tout va bien',
+  no_page: 'pas de page visible',
+  hand_blocking: 'une main cache la page',
+};
+
+/** After the break: back to work, with the next subject of the plan. */
+const BACK_TO_WORK: Record<string, (next?: string) => string> = {
+  fr: (n) => `C’est reparti !${n ? ` Montre-moi : ${n}.` : ''}`,
+  ar: (n) => `يالاه نكمّلو!${n ? ` ورّيني: ${n}.` : ''}`,
+  fus: (n) => `هيا نكمل!${n ? ` أريني: ${n}.` : ''}`,
+  en: (n) => `Let’s go again!${n ? ` Show me: ${n}.` : ''}`,
+};
+
+/** A child's request got no answer in time: say so, never go silent. */
+const NO_ANSWER: Record<string, string> = {
+  fr: 'Je n’ai pas réussi à lire. Montre-moi encore la page, s’il te plaît.',
+  ar: 'ما قدرتش نقرا مزيان. ورّيني الصفحة مرة أخرى.',
+  fus: 'لم أستطع القراءة جيدًا. أريني الصفحة مرة أخرى من فضلكِ.',
+  en: 'I couldn’t read it. Please show me the page again.',
+};
+
+/** "Photo lue · 3 réponses · rien de nouveau" */
+function seenText(p: SessionEvents['analysis.done']): string {
+  if (p.reason === 'no_page' || p.reason === 'hand_blocking') return `Photo : ${QUIET[p.reason]}`;
+  const parts = [`Photo lue · ${p.read} réponse${p.read > 1 ? 's' : ''}`];
+  if (p.wrong) parts.push(`${p.wrong} à revoir`);
+  else if (p.right) parts.push(`${p.right} juste${p.right > 1 ? 's' : ''}`);
+  if (p.quiet && p.reason && QUIET[p.reason]) parts.push(QUIET[p.reason]);
+  return parts.join(' · ');
+}
 
 export default function Board() {
   useKeepAwake();
@@ -53,6 +91,17 @@ export default function Board() {
   const [choices, setChoices] = useState<ExerciseChoice[]>([]);
   /** Active exercise: stays until the child names or taps another one (synced with the Camera). */
   const [focus, setFocus] = useState<ExerciseFocus | null>(null);
+  /** What Silia saw on the last photo, even when she stays quiet ("Photo lue · 3 réponses · rien de nouveau"). */
+  const [seen, setSeen] = useState('');
+  const reload = useAppStore((s) => s.reload);
+  /** Tutor messages already shown (live or by the fallback poll). */
+  const shownRef = useRef<Set<string>>(new Set());
+  const pollBaselineRef = useRef<string | null>(null);
+  const showMessageRef = useRef<(p: SessionEvents['tutor.say']) => void>(() => undefined);
+  /** Parent changed a setting (language, level): refresh what depends on it. Set once loadLanguage exists. */
+  const settingsChangedRef = useRef<() => void>(() => undefined);
+  /** The bubble still shows the greeting (nothing said yet). */
+  const greetingShownRef = useRef(true);
 
   const startedRef = useRef(false);
   const lastTextRef = useRef(GREETING);
@@ -66,16 +115,73 @@ export default function Board() {
   const correctRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const checkBoardPhotoRef = useRef<(why: string) => void>(() => undefined);
 
-  // Safety net: never stay "thinking" forever (lost reply, server error, network cut).
+  // ---------- turns: one at a time; the child may interrupt, an automatic photo never does ----------
+  const moodRef = useRef(mood);
+  moodRef.current = mood;
+  /** The turn Silia is working on (who asked: the child, or an automatic photo). */
+  const turnRef = useRef<TurnRef | null>(null);
+  /** An automatic message that arrived while Silia was busy: played when she is free, if still fresh (20 s). */
+  const queuedRef = useRef<{ p: SessionEvents['tutor.say']; at: number } | null>(null);
+  /** Photo lock: a new photo waits while Silia looks, talks or listens about the current one. */
+  const pendingPhotoRef = useRef<string | null>(null);
+  const afterTurnRef = useRef<() => void>(() => undefined);
+  /** Orientation of the whole session (the Camera stays on its stand). null = not decided yet. */
+  const [sessionRotation, setSessionRotation] = useState<number | null>(null);
+
+  // The evening's plan (from the homework diary) and the break between subjects.
+  const [plan, setPlan] = useState<SessionPlan | null>(null);
+  const [breakLeft, setBreakLeft] = useState(0);
+  const breakRef = useRef<{ seconds: number; next?: string; language: string } | null>(null);
+  const breakNextRef = useRef<{ next?: string; language: string } | null>(null);
+
+  // Tell the Camera when Silia is busy or on a break (no automatic photo then), and finish the turn when she is free.
+  useEffect(() => {
+    const busy = mood !== 'idle' || breakLeft > 0;
+    if (channelRef.current) sendEvent(channelRef.current, 'board.state', { state: busy ? 'busy' : 'watching' });
+    if (mood === 'idle' && breakLeft === 0) afterTurnRef.current();
+  }, [mood, breakLeft]);
+
+  // Break countdown: one second at a time; at 0 (or "Reprendre"), Silia calls her back to work.
+  useEffect(() => {
+    if (breakLeft <= 0) return;
+    const id = setTimeout(() => setBreakLeft((s) => s - 1), 1000);
+    if (breakLeft === 1) {
+      const back = breakNextRef.current;
+      breakNextRef.current = null;
+      const lang = back?.language ?? forcedLangRef.current ?? 'fr';
+      const text = (BACK_TO_WORK[lang] ?? BACK_TO_WORK.fr)(back?.next);
+      setTimeout(() => {
+        setBubble(text);
+        setBubbleLang(lang);
+        speakRef.current(text, { language: lang });
+      }, 1000);
+    }
+    return () => clearTimeout(id);
+  }, [breakLeft]);
+
+  // Safety net: never stay "thinking" forever. The child asked (Corriger, Parler, a button): after 25 s Silia says
+  // she could not read it. An automatic photo: back to Watching silently after 45 s.
   useEffect(() => {
     if (mood !== 'thinking') return;
-    const timer = setTimeout(() => {
-      log('board', 'no reply after 45 s: back to idle');
-      setMood('idle');
-      setExplaining(false);
-    }, 45_000);
+    const childTurn = turnRef.current?.priority === 'child';
+    const timer = setTimeout(
+      () => {
+        log('board', `no reply after ${childTurn ? 25 : 45} s (${childTurn ? 'child' : 'automatic'} turn)`);
+        setExplaining(false);
+        turnRef.current = null;
+        if (childTurn && startedRef.current) {
+          const lang = forcedLangRef.current ?? lastVoiceRef.current.language ?? 'fr';
+          const text = NO_ANSWER[lang] ?? NO_ANSWER.fr;
+          setBubble(text);
+          setBubbleLang(lang);
+          speakRef.current(text, { language: lang });
+        } else setMood('idle');
+      },
+      childTurn ? 25_000 : 45_000,
+    );
     return () => clearTimeout(timer);
   }, [mood]);
+  const speakRef = useRef<(text: string, opts?: { language?: string }) => void>(() => undefined);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const speak = useCallback(
@@ -114,6 +220,8 @@ export default function Board() {
     },
     [],
   );
+
+  speakRef.current = speak;
 
   /** Says a familiar phrase of this kind in the current language (no server call). */
   const sayFamiliar = useCallback(
@@ -181,6 +289,11 @@ export default function Board() {
           { event: '*', schema: 'public', table: 'homework_sessions', filter: `household_id=eq.${device.householdId}` },
           refresh,
         )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'children', filter: `household_id=eq.${device.householdId}` },
+          () => settingsChangedRef.current(),
+        )
         .subscribe();
     })();
     return () => {
@@ -205,6 +318,21 @@ export default function Board() {
           .limit(1)
           .maybeSingle();
         if (latest && latest.id !== photoIdRef.current) loadPhoto(latest.id);
+
+        // Missed reply (TV asleep, live connection dropped): show the newest message if it is recent and not shown yet.
+        const { data: msg } = await supabase
+          .from('tutor_messages')
+          .select('id, kind, text, language, annotations, created_at')
+          .eq('session_id', open.id)
+          .neq('kind', 'system')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (msg && pollBaselineRef.current === null) pollBaselineRef.current = msg.id; // older than this Board: never replay
+        else if (msg && msg.id !== pollBaselineRef.current && !shownRef.current.has(msg.id) && Date.now() - Date.parse(msg.created_at) < 90_000) {
+          log('board', 'reply missed live, shown from the poll', msg.id);
+          showMessageRef.current({ message_id: msg.id, kind: msg.kind, text: msg.text, language: msg.language, annotations: msg.annotations ?? [] });
+        }
       } catch (e) {
         console.warn('board poll', e);
       }
@@ -230,14 +358,49 @@ export default function Board() {
         .maybeSingle();
       if (latest && !cancelled) loadPhoto(latest.id);
       loadFocus(sessionId).then((f) => !cancelled && setFocus(f));
+      supabase
+        .from('homework_sessions')
+        .select('rotation')
+        .eq('id', sessionId)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (!cancelled && !error) setSessionRotation((data as { rotation?: number | null } | null)?.rotation ?? null);
+        });
+      supabase
+        .from('homework_sessions')
+        .select('plan')
+        .eq('id', sessionId)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (!cancelled && !error) setPlan(((data as { plan?: SessionPlan | null } | null)?.plan as SessionPlan | null) ?? null);
+        });
 
       const ch = await sessionChannel(sessionId);
       if (cancelled) return;
       channel = ch;
+      const busyNow = () => moodRef.current !== 'idle';
+      /** An automatic message must not cut Silia, nor overtake the child's pending request. */
+      const mustWait = (t?: TurnRef) =>
+        t?.priority === 'auto' &&
+        (speakingRef.current || listeningRef.current || (turnRef.current?.priority === 'child' && turnRef.current.id !== t.id));
+      const sameTurn = (t?: TurnRef) => !t || !turnRef.current || t.id === turnRef.current.id;
+
       onEvent(ch, 'snapshot.new', (p) => {
+        // Locked while she talks, listens, or works on the child's own request; an automatic look shows it at once.
+        if (speakingRef.current || listeningRef.current || (busyNow() && turnRef.current?.priority === 'child')) {
+          pendingPhotoRef.current = p.snapshot_id; // photo lock: shown when this turn ends
+          log('board', 'new photo waits: Silia is busy with the current page');
+          return;
+        }
         setAnnotations([]);
         setChoices([]);
         loadPhoto(p.snapshot_id);
+      });
+      onEvent(ch, 'session.rotation', (p) => setSessionRotation(p.rotation));
+      onEvent(ch, 'plan.changed', (p) => setPlan(p.plan));
+      onEvent(ch, 'session.break', (p) => {
+        breakRef.current = p; // starts when Silia has finished her sentence
+        if (moodRef.current === 'idle' && !speakingRef.current) afterTurnRef.current();
       });
       onEvent(ch, 'focus.changed', (p) => {
         log('board', `active exercise: ${p.focus ? `${exerciseName(p.focus)} ${p.focus.title}` : 'none'} (${p.by})`);
@@ -278,6 +441,8 @@ export default function Board() {
       // The child speaks (push-to-talk on the Camera): stop talking at once and listen, like a teacher.
       onEvent(ch, 'child.talk.start', () => {
         stopVoice();
+        queuedRef.current = null; // she talks: older automatic messages are dropped
+        turnRef.current = newTurn('child');
         speakingRef.current = false;
         listeningRef.current = true;
         setChoices([]);
@@ -287,16 +452,26 @@ export default function Board() {
         listeningRef.current = false;
         setMood('thinking');
       });
-      onEvent(ch, 'tutor.thinking', () => {
+      onEvent(ch, 'tutor.thinking', (p) => {
+        // An automatic photo while Silia is busy: she keeps going, the result will wait in the queue.
+        if (p.turn?.priority === 'auto' && busyNow()) return;
+        if (p.turn?.priority === 'child' && speakingRef.current) {
+          stopVoice(); // the child asked something: stop and look
+          speakingRef.current = false;
+        }
+        if (p.turn) turnRef.current = p.turn;
         // A short "Hmm…" while she looks, unless she is already talking or listening.
         if (!speakingRef.current && !listeningRef.current && Math.random() < 0.6) sayFamiliar('filler', 'Hmm…', false);
         setMood('thinking');
       });
-      onEvent(ch, 'tutor.say', async (p) => {
-        if (!p.text) {
-          setMood('idle');
-          return;
-        }
+      onEvent(ch, 'analysis.done', (p) => {
+        setSeen(seenText(p));
+        if (p.quiet && sameTurn(p.turn)) setMood((m) => (m === 'thinking' ? 'idle' : m));
+      });
+      const playSay = async (p: SessionEvents['tutor.say']) => {
+        if (shownRef.current.has(p.message_id)) return;
+        shownRef.current.add(p.message_id);
+        greetingShownRef.current = false;
         if (p.snapshot_id && p.snapshot_id !== photoIdRef.current) await loadPhoto(p.snapshot_id);
         setAnnotations(p.annotations);
         setChoices([]);
@@ -305,8 +480,62 @@ export default function Board() {
         setBubbleLang(p.language);
         setExplaining(false);
         speak(p.text, { messageId: p.message_id, language: p.language, audioUrl: p.audio_url, phrase: p.phrase });
+      };
+      onEvent(ch, 'tutor.say', async (p) => {
+        if (!p.text) {
+          // "stop thinking" of an older turn must not stop the current one
+          if (sameTurn(p.turn) && !speakingRef.current) setMood('idle');
+          return;
+        }
+        if (shownRef.current.has(p.message_id)) return;
+        if (mustWait(p.turn)) {
+          queuedRef.current = { p, at: Date.now() };
+          log('board', 'automatic message waits: Silia is busy', p.text);
+          return;
+        }
+        if (p.turn) turnRef.current = p.turn;
+        await playSay(p);
       });
+      // Silia is free again: a waiting automatic message (if still fresh), else the newest photo.
+      afterTurnRef.current = () => {
+        // "Bravo, c'est fini… pause d'une minute" has been said: the break starts now.
+        const pendingBreak = breakRef.current;
+        if (pendingBreak) {
+          breakRef.current = null;
+          breakNextRef.current = { next: pendingBreak.next, language: pendingBreak.language };
+          queuedRef.current = null;
+          setBreakLeft(pendingBreak.seconds);
+          return;
+        }
+        const queued = queuedRef.current;
+        queuedRef.current = null;
+        if (queued && Date.now() - queued.at < 20_000) {
+          log('board', 'playing the message that waited');
+          turnRef.current = queued.p.turn ?? null;
+          void playSay(queued.p);
+          return;
+        }
+        turnRef.current = null;
+        const pending = pendingPhotoRef.current;
+        pendingPhotoRef.current = null;
+        if (pending && pending !== photoIdRef.current) {
+          setAnnotations([]);
+          loadPhoto(pending);
+        }
+      };
+      showMessageRef.current = (p) => {
+        if (shownRef.current.has(p.message_id)) return;
+        shownRef.current.add(p.message_id);
+        greetingShownRef.current = false;
+        setAnnotations(p.annotations);
+        setChoices([]);
+        setBubble(p.text);
+        setBubbleLang(p.language);
+        setExplaining(false);
+        speak(p.text, { messageId: p.message_id, language: p.language });
+      };
       onEvent(ch, 'tutor.ask_exercise', async (p) => {
+        greetingShownRef.current = false;
         if (p.snapshot_id !== photoIdRef.current) await loadPhoto(p.snapshot_id);
         setExplaining(false);
         setChoices(p.choices);
@@ -321,11 +550,14 @@ export default function Board() {
         speak(p.text, { language: p.language, phrase: p.phrase, audioUrl: p.audio_url });
       });
       onEvent(ch, 'board.annotate', (p) => {
-        setMood('idle');
+        if (sameTurn(p.turn) && !speakingRef.current) setMood('idle');
         setAnnotations((cur) => (p.clear ? p.annotations : [...cur, ...p.annotations]));
       });
       onEvent(ch, 'session.state', (p) => {
-        if (p.status === 'finished') sayFamiliar('end', 'Bravo ! Les devoirs sont finis.');
+        // Finished: the recap (session-summary) is already being said; never cut it with the short goodbye.
+        if (p.status === 'finished') {
+          if (!speakingRef.current) sayFamiliar('end', 'Bravo ! Les devoirs sont finis.');
+        }
         else if (p.status === 'paused') sayFamiliar('pause', 'Pause. Je t’attends.');
         else sayFamiliar('resume', 'C’est reparti !');
       });
@@ -370,6 +602,22 @@ export default function Board() {
     return last?.language ?? lastVoiceRef.current.language ?? 'fr';
   }, [device]);
 
+  settingsChangedRef.current = () => {
+    log('board', 'parent changed a setting: refreshing');
+    loadLanguage()
+      .then((lang) => {
+        if (!greetingShownRef.current) return; // Silia is in the middle of something: the next message uses the new setting
+        const greeting = pickPhrase('greeting', lang);
+        if (greeting) {
+          setBubble(greeting.text);
+          setBubbleLang(greeting.lang);
+          lastTextRef.current = greeting.text;
+          lastVoiceRef.current = { language: greeting.lang, phrase: greeting.audio_path };
+        }
+      })
+      .catch(() => undefined);
+  };
+
   // Familiar phrases (Bravo, Hmm…) + the language, loaded at start; the greeting is shown in that language.
   useEffect(() => {
     let cancelled = false;
@@ -387,14 +635,32 @@ export default function Board() {
     const id = setInterval(() => {
       loadLanguage().catch(() => undefined);
     }, 10_000);
+    // Phrase audio links last 24 h: renew them, the TV may stay on for days.
+    const renew = setInterval(() => loadPhrases().catch(() => 0), 6 * 3600_000);
+    const offVoice = onVoiceIssue(setLink);
     return () => {
       cancelled = true;
       clearInterval(id);
+      clearInterval(renew);
+      offVoice();
     };
   }, [loadLanguage]);
 
   /** Corriger: ask the Camera for a fresh photo; no answer within 2 s (or it fails): check the photo on the Board. */
+  /** The child pressed a button on the Board: her turn, Silia stops talking and looks. */
+  function childTurn() {
+    const turn = newTurn('child');
+    turnRef.current = turn;
+    queuedRef.current = null;
+    if (speakingRef.current) {
+      stopVoice();
+      speakingRef.current = false;
+    }
+    return turn;
+  }
+
   function correct() {
+    childTurn();
     setMood('thinking');
     if (!channelRef.current) {
       void checkBoardPhoto('no live channel');
@@ -418,7 +684,9 @@ export default function Board() {
       return;
     }
     log('board', `corriger: ${why} -> checking the Board photo ${snapshotId}`);
-    const { error } = await supabase.functions.invoke('analyze-snapshot', { body: { snapshot_id: snapshotId, mode: 'check' } });
+    const { error } = await supabase.functions.invoke('analyze-snapshot', {
+      body: { snapshot_id: snapshotId, mode: 'check', turn: turnRef.current ?? newTurn('child') },
+    });
     if (error) {
       setMood('idle');
       setLink(`corriger : ${await functionError(error)}`);
@@ -429,15 +697,26 @@ export default function Board() {
   /** Exercise help (buttons and choice taps): same server logic as the child's voice requests. */
   async function explainExercise(choice?: ExerciseChoice, action?: HelpAction | 'choose') {
     if (!session) return;
+    const turn = childTurn();
     setExplaining(true);
     setChoices([]);
     setMood('thinking');
-    const { error } = await requestHelp(session.id, { choice, action });
+    const { error } = await requestHelp(session.id, { choice, action, turn });
     setExplaining(false);
     if (error) {
       setMood('idle');
       setLink(`exercice : ${error}`);
     }
+  }
+
+  /** The page shows sideways: turn it a quarter, for the whole session (saved, shared with every screen). */
+  async function rotate() {
+    if (!session || !photo) return;
+    const next = (((sessionRotation ?? photo.rotation ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+    setSessionRotation(next);
+    if (channelRef.current) sendEvent(channelRef.current, 'session.rotation', { rotation: next });
+    const { error } = await supabase.from('homework_sessions').update({ rotation: next }).eq('id', session.id);
+    if (error) log('board', 'rotation not saved (migration?)', error.message);
   }
 
   function start() {
@@ -468,6 +747,7 @@ export default function Board() {
             <Text style={{ color: session?.status === 'active' ? colors.success : colors.muted }}>● </Text>
             {statusLabel}
           </Text>
+          {session && seen ? <Text style={[styles.chip, { color: colors.muted }]} numberOfLines={1}>{seen}</Text> : null}
           {session ? <Text style={[styles.chip, { color: colors.muted }]}>{link}</Text> : null}
         </View>
       </View>
@@ -476,7 +756,18 @@ export default function Board() {
         <View style={[styles.wood, { flex: landscape ? 3 : 2 }]}>
           <View style={styles.chalkboard}>
             {photo ? (
-              <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={photo.rotation} annotations={shown} />
+              <>
+                <AnnotatedPhoto
+                  uri={photo.uri}
+                  width={photo.width}
+                  height={photo.height}
+                  rotation={sessionRotation ?? photo.rotation}
+                  annotations={shown}
+                />
+                <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={styles.rotate}>
+                  <Text style={styles.rotateText}>↻</Text>
+                </Pressable>
+              </>
             ) : (
               <Text style={styles.chalkText}>J’attends la première photo du cahier…</Text>
             )}
@@ -484,7 +775,30 @@ export default function Board() {
         </View>
 
         <View style={[styles.side, { flex: landscape ? 2 : 1, flexDirection: landscape ? 'column' : 'row' }]}>
-          {focus && !choices.length ? (
+          {plan?.items.length ? (
+            <View style={styles.plan}>
+              {plan.items.map((i) => (
+                <Text
+                  key={i.id}
+                  numberOfLines={1}
+                  style={[styles.planItem, i.status === 'active' && styles.planActive, i.status === 'done' && styles.planDone]}
+                >
+                  {i.status === 'done' ? '✓ ' : ''}
+                  {i.label}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {breakLeft > 0 ? (
+            <View style={styles.breakCard}>
+              <Text style={styles.breakTitle}>Pause</Text>
+              <Text style={styles.breakCount}>{breakLeft}</Text>
+              <Pressable accessibilityRole="button" onPress={() => setBreakLeft(1)} style={styles.focusChange} preferFocus>
+                <Text style={styles.focusChangeText}>Reprendre</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {focus && !choices.length && breakLeft === 0 ? (
             <View style={styles.focusCard}>
               <View style={styles.focusRow}>
                 <Text style={styles.focusNumber}>{exerciseName(focus)}</Text>
@@ -572,12 +886,13 @@ export default function Board() {
           }}
         />
         {Platform.OS === 'web' ? <Button label="Plein écran" variant="secondary" onPress={fullscreen} /> : null}
+        <Button label="Recharger" variant="secondary" onPress={reload} />
         <Button label="Délier" variant="ghost" onPress={unpair} />
       </View>
 
       {!started ? (
         <View style={styles.startOverlay}>
-          <Pressable accessibilityRole="button" onPress={start} style={styles.startButton}>
+          <Pressable accessibilityRole="button" onPress={start} style={styles.startButton} preferFocus>
             <Text style={styles.startText}>Commencer les devoirs</Text>
           </Pressable>
           <Text style={styles.startHint}>Active {TUTOR_NAME}, ta maîtresse.</Text>
@@ -611,6 +926,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  plan: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  planItem: {
+    color: colors.muted,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    fontSize: 15,
+    fontWeight: '800',
+    overflow: 'hidden',
+    maxWidth: 220,
+  },
+  planActive: { color: colors.text, borderWidth: 2, borderColor: colors.accent },
+  planDone: { color: colors.success },
+  breakCard: { alignSelf: 'stretch', alignItems: 'center', gap: space.sm, backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg },
+  breakTitle: { color: colors.accent, fontSize: 22, fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' },
+  breakCount: { color: colors.text, fontSize: 56, fontWeight: '900' },
+  rotate: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(27,35,64,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rotateText: { color: '#FFFFFF', fontSize: 24, fontWeight: '900' },
   chalkText: { color: '#F4F1E8', fontSize: 28, fontWeight: '700', textAlign: 'center' },
   side: { alignItems: 'center', gap: space.md, minHeight: 0, minWidth: 0 },
   bubble: {

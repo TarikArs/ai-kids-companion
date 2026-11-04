@@ -1,9 +1,13 @@
-import type { DeviceRole } from '@hc/shared';
+import type { DeviceRole, SessionSummary } from '@hc/shared';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { RoleArt } from '@/components/illustrations';
 import { Body, Button, ErrorText, Screen } from '@/components/ui';
+import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
 import { TUTOR_NAME } from '@/lib/tutor';
@@ -71,6 +75,31 @@ export function ParentHome({
   const [advanced, setAdvanced] = useState(false);
   const [voices, setVoices] = useState('');
   const [warming, setWarming] = useState(false);
+  const setDevice = useAppStore((s) => s.setDevice);
+  const setRole = useAppStore((s) => s.setRole);
+
+  /** This phone becomes the Camera: no third device, no pairing code. "Parent" on the Camera comes back here. */
+  function openAsCamera() {
+    setDevice({ id: `parent:${household.id}`, householdId: household.id, role: 'camera', viaParent: true });
+    setRole('camera');
+    router.replace('/camera');
+  }
+
+  /** Report of the latest finished session (written by Silia at "Terminer"). */
+  const [report, setReport] = useState<{ started_at: string; summary: SessionSummary } | null>(null);
+  useEffect(() => {
+    supabase
+      .from('homework_sessions')
+      .select('started_at, summary')
+      .eq('household_id', household.id)
+      .not('summary', 'is', null)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data?.summary) setReport(data as { started_at: string; summary: SessionSummary });
+      });
+  }, [household.id]);
 
   const loadDevices = useCallback(async () => {
     const { data, error: e } = await supabase
@@ -152,6 +181,32 @@ export function ParentHome({
           />
         </View>
       ) : null}
+
+      {/* latest session report */}
+      {report ? (
+        <View style={styles.section}>
+          <Text style={styles.rowTitle}>
+            Dernière séance · {new Date(report.started_at).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' })}
+          </Text>
+          <Text style={styles.sub}>
+            {report.summary.minutes} min · {report.summary.answers} réponses vérifiées · {report.summary.right} justes
+            {report.summary.wrong ? ` · ${report.summary.wrong} à revoir` : ''}
+          </Text>
+          <Text style={styles.report}>{report.summary.parent_text}</Text>
+        </View>
+      ) : null}
+
+      {/* this phone as the Camera */}
+      <Pressable accessibilityRole="button" onPress={openAsCamera} style={({ pressed }) => [styles.section, styles.thisPhone, pressed && { opacity: 0.85 }]}>
+        <View style={styles.art}>
+          <RoleArt name="camera" size={64} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle}>Utiliser ce téléphone comme Caméra</Text>
+          <Text style={styles.sub}>Pas besoin d’un autre appareil. Bouton « Parent » pour revenir ici.</Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </Pressable>
 
       {/* devices */}
       <Text style={styles.heading}>Appareils</Text>
@@ -306,5 +361,8 @@ const styles = StyleSheet.create({
   pillSelected: { backgroundColor: colors.accent },
   pillText: { color: colors.text, fontSize: 15, fontWeight: '800' },
   pillTextSelected: { color: colors.onAccent },
+  thisPhone: { flexDirection: 'row', alignItems: 'center', gap: space.md, borderWidth: 2, borderColor: colors.accent },
+  chevron: { color: colors.muted, fontSize: 30, fontWeight: '300' },
+  report: { color: colors.text, fontSize: 15, lineHeight: 22 },
   advancedToggle: { alignSelf: 'flex-start', paddingVertical: space.sm },
 });

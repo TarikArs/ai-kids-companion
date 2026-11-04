@@ -2,7 +2,7 @@
 // (by voice in child-talk, by buttons in explain-exercise). One executor for both, so voice and taps stay in sync.
 
 import { expectedAnswer, ownCalculationSlip, sameAnswer } from './arithmetic.ts';
-import { broadcast } from './broadcast.ts';
+import { broadcast, type Turn } from './broadcast.ts';
 import { FOCUS_TEXT, isArabic, LANGUAGE_NAME, SPEAKING_STYLE, tutorLang, type Lang } from './language.ts';
 import { HELP_ACTIONS, type Decision, type FocusState, type HelpAction, type Intent } from './intent.ts';
 import { downloadB64, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
@@ -17,6 +17,8 @@ const FOCUS_COLOR = '#7FD3FF';
 export interface HelpCtx {
   session: { id: string; household_id: string };
   topic: string;
+  /** The turn this request belongs to (echoed on every message). */
+  turn?: Turn | null;
   grade: string;
   advanced: boolean;
   /** Parent's tutor language ('auto' / null = follow the page). */
@@ -31,6 +33,10 @@ export interface HelpCtx {
 export const languageFor = (c: HelpCtx, fallback?: string | null): Lang => tutorLang(c.setting, c.page?.lang ?? fallback ?? 'fr');
 const forcedLang = (c: HelpCtx): Lang | null => (c.setting && c.setting !== 'auto' ? tutorLang(c.setting, null) : null);
 const exName = (e: { n: number; label?: string }) => e.label ?? String(e.n);
+
+/** Broadcast tagged with the request's turn. */
+const bc = (c: HelpCtx, event: string, payload: Record<string, unknown>): Promise<void> =>
+  broadcast(c.topic, event, c.turn ? { ...payload, turn: c.turn } : payload);
 
 // ---------- focus state ----------
 
@@ -58,7 +64,7 @@ async function saveFocus(c: HelpCtx, e: PageExercise | null, by: 'voice' | 'tap'
   if (error) c.log('focus not saved (migration?)', error.message);
   c.focus = focus;
   c.pending = pending;
-  if (changed || by === 'tap') await broadcast(c.topic, 'focus.changed', { focus, by });
+  if (changed || by === 'tap') await bc(c, 'focus.changed', { focus, by });
 }
 
 async function savePending(c: HelpCtx, pending: HelpAction | null) {
@@ -85,7 +91,7 @@ async function say(
   const audioUrl = await speechUrl(text, language);
   const messageId = crypto.randomUUID();
   const annotations = opts.annotations ?? [];
-  await broadcast(c.topic, 'tutor.say', {
+  await bc(c, 'tutor.say', {
     message_id: messageId,
     kind,
     text,
@@ -286,13 +292,21 @@ async function answerTurn(c: HelpCtx, transcript: string, e: PageExercise | null
   const convo = await history(c.session.id);
   const mode = c.focus?.action;
   const prompt = `You are Silia, the kind teacher of a girl in ${c.grade}, helping with homework (your name is always Silia; in Arabic: سيليا).
-${c.page?.text ? `Her homework page says:\n"""${c.page.text.slice(0, 1500)}"""` : 'There is no readable photo of her page yet.'}
+${
+    c.page?.text
+      ? `Her homework page says:\n"""${c.page.text.slice(0, 1500)}"""`
+      : c.page?.readable && c.page.exercises.length
+        ? `Exercises on her page: ${c.page.exercises.map((x) => `${exName(x)}. ${x.title}: ${x.instr}`).join(' | ').slice(0, 800)}`
+        : 'There is no readable photo of her page yet.'
+  }
 ${e ? `${exerciseBlock(e, c.page!, 'answers')}\nYou are ${mode === 'solve' ? 'solving this exercise together, step by step' : mode === 'correct' ? 'correcting this exercise with her' : 'helping her with this exercise'}. The right answers above are SECRET: never say them; use them only to tell her whether a step or a result she says is right.` : 'No exercise is selected.'}
 ${convo ? `Recent conversation:\n${convo}` : ''}
 She just said: "${transcript}"
 Answer in ${SPEAKING_STYLE[lang]}, 1 to 4 short sentences, warm, read aloud (no lists, no emojis).
 If she gives a step or a result: say if it is right (praise) or not quite (kind hint), then give the next small step.
 If her answer to an item cannot be seen on the photo, say so instead of guessing. Never give the final answer of an item.
+If Silia just asked her to retell the text in her own words: compare with the page text, praise what she understood,
+and gently add the ONE key point she missed (if any).
 If what she said is unclear, kindly ask her to repeat. Reply with the answer only.`;
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -344,7 +358,7 @@ export async function execute(
       await savePending(c, d.action);
       const choices = choicesOf(exs);
       const audioUrl = await speechUrl(text, lang);
-      await broadcast(c.topic, 'tutor.ask_exercise', {
+      await bc(c, 'tutor.ask_exercise', {
         snapshot_id: c.snap!.id,
         language: lang,
         text,

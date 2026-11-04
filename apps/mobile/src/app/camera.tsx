@@ -11,11 +11,14 @@ import {
   type RecordingOptions,
 } from 'expo-audio';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { router } from 'expo-router';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { IconButton } from '@/components/icon-button';
@@ -23,6 +26,7 @@ import { Body, Button, Screen, Title } from '@/components/ui';
 import {
   base64ToBytes,
   findOpenSession,
+  newTurn,
   onEvent,
   sendEvent,
   sessionChannel,
@@ -37,12 +41,18 @@ import { log, logError } from '@/lib/log';
 import { ACTION_LABEL, exerciseName, loadFocus, requestHelp } from '@/lib/exercise';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { useUnpair } from '@/lib/use-unpair';
+import { CHANGED, MOVING, changedPixels, grabFrame, type Frame } from '@/lib/page-watch';
+
+/** Page check every 3 s; a photo anyway after 2 min without one (slow, faint pencil changes). */
+const WATCH_MS = 3000;
+const SAFETY_MS = 120_000;
 
 // 2048 px: pencil digits stay readable when the server zooms on an answer.
 const MAX_SIDE = 2048;
 // A 2048 px JPEG of a real page is usually 250-700 KB. Black, empty or very blurry photos compress far smaller.
 const MIN_PHOTO_BYTES = 70_000;
-const MAX_TALK_MS = 45_000;
+// Long enough to read a whole passage aloud.
+const MAX_TALK_MS = 90_000;
 
 // Small speech recording: mono, 16 kHz, 32 kbps (speech-to-text is billed per minute, small files upload fast).
 const TALK_OPTIONS: RecordingOptions = {
@@ -86,6 +96,14 @@ export default function Camera() {
   useKeepAwake();
   const device = useAppStore((s) => s.device);
   const unpair = useUnpair();
+  const setDevice = useAppStore((s) => s.setDevice);
+  const setRole = useAppStore((s) => s.setRole);
+  /** Parent's phone in Camera mode: "back to parent" instead of unlinking. */
+  const backToParent = () => {
+    setDevice(null);
+    setRole('parent');
+    router.replace('/parent');
+  };
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -100,7 +118,11 @@ export default function Camera() {
 
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<HomeworkSession | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(0);
+  /** What the page watcher is doing, shown in the top chip. */
+  const [watch, setWatch] = useState<'watching' | 'waiting' | 'moving'>('watching');
+  const watchRef = useRef<{ ref: Frame | null; prev: Frame | null; lastSent: number }>({ ref: null, prev: null, lastSent: 0 });
+  /** The Board's state: no automatic photo while Silia looks, talks or listens. */
+  const boardRef = useRef<{ state: 'watching' | 'busy'; at: number }>({ state: 'watching', at: 0 });
   const [busy, setBusy] = useState(false);
   const [talk, setTalk] = useState<TalkState>('idle');
   const [status, setStatus] = useState('');
@@ -128,6 +150,10 @@ export default function Camera() {
     sessionChannel(session.id).then((ch) => {
       if (cancelled) return;
       channel = ch;
+      onEvent(ch, 'session.break', () => setStatus('Pause ! Lève-toi et étire-toi, je t’attends.'));
+      onEvent(ch, 'board.state', (p) => {
+        boardRef.current = { state: p.state, at: Date.now() };
+      });
       onEvent(ch, 'focus.changed', (p) => {
         setFocus(p.focus);
         setChoices([]);
@@ -154,7 +180,9 @@ export default function Camera() {
   }, [session, device]);
 
   // ---------- photos ----------
-  const capture = useCallback(async (mode?: 'check', requestId?: string) => {
+  const capture = useCallback(async (mode?: 'check', requestId?: string, manual = false) => {
+    // The child pressed something (Photo, Corriger, Corriger on the Board): her turn. Otherwise an automatic photo.
+    const turn = newTurn(mode === 'check' || requestId || manual ? 'child' : 'auto');
     // Corriger from the Board: tell it whether this phone takes the photo (else it checks its own photo after 2 s).
     const failed = (reason: string) => {
       if (requestId && channelRef.current) sendEvent(channelRef.current, 'capture.failed', { request_id: requestId, reason });
@@ -213,20 +241,29 @@ export default function Camera() {
           if (channelRef.current) sendEvent(channelRef.current, 'snapshot.new', { snapshot_id: snap.id, storage_path: path });
         });
       const analyze = supabase.functions.invoke('analyze-snapshot', {
-        body: { snapshot_id: snap.id, image_b64: saved.base64, ...(mode ? { mode } : {}) },
+        body: { snapshot_id: snap.id, image_b64: saved.base64, turn, ...(mode ? { mode } : {}) },
       });
-      const [, { data, error: fnErr }] = await withTimeout(Promise.all([upload, analyze]), 40_000, 'Analyse');
+      const [, { data, error: fnErr }] = await withTimeout(Promise.all([upload, analyze]), 60_000, 'Analyse');
       if (myId !== captureIdRef.current) return; // a newer photo (Corriger) took over
       if (fnErr) throw new Error(await functionError(fnErr));
       const tDone = Date.now();
       log('camera', `photo: analysis done in ${tDone - t0} ms`, data);
       if (data?.reason === 'no_page') setStatus('Je ne vois pas le cahier. Vise la page.');
       else if (data?.reason === 'hand_blocking') setStatus('Une main cache le cahier.');
-      else if (data?.action === 'silent') setStatus('');
+      else if (data?.action === 'silent') {
+        const why: Record<string, string> = {
+          nothing_new: 'J’ai regardé : rien de nouveau. Continue !',
+          unsure: 'J’ai du mal à lire. Écris plus fort ou rapproche le téléphone.',
+          no_answers: 'J’ai regardé : pas encore de réponse écrite.',
+          not_checkable: 'J’ai regardé. Continue !',
+          cooldown: 'J’ai regardé : ça avance bien !',
+        };
+        setStatus(why[data.quiet_reason] ?? 'J’ai regardé.');
+      }
       setDetails(
         [
           data?.new_items !== undefined
-            ? `Lu : ${data.new_items} réponse(s) · ${data.right ?? 0} juste(s) · ${data.wrong ?? 0} fausse(s)`
+            ? `Lu : ${data.read ?? '?'} réponse(s), ${data.new_items} nouvelle(s) · ${data.right ?? 0} juste(s) · ${data.wrong ?? 0} fausse(s)${data.quiet_reason ? ` · silence : ${data.quiet_reason}` : ''}`
             : data?.reason
               ? `Rien lu (${data.reason})`
               : '',
@@ -246,7 +283,9 @@ export default function Camera() {
       if (myId === captureIdRef.current) {
         busyRef.current = false;
         setBusy(false);
-        setSecondsLeft(session.capture_interval_s);
+        // This photo is the new reference: the watcher sends again only after a new change.
+        watchRef.current.lastSent = Date.now();
+        if (watchRef.current.prev) watchRef.current.ref = watchRef.current.prev;
       }
     }
   }, [device, session]);
@@ -257,20 +296,53 @@ export default function Camera() {
     };
   }, [capture]);
 
-  // Timer: counts down while active and nobody is talking; a photo is taken at 0 (also right at the start).
+  // Page watcher: a photo when the page changed and is still again. Never while Silia looks, talks or listens,
+  // never while the child talks. The first look of a session sends a photo at once.
   const active = !!session && session.status === 'active' && ready;
   useEffect(() => {
     if (!active) return;
-    const id = setInterval(
-      () => setSecondsLeft((s) => (busyRef.current || talkRef.current ? s : Math.max(0, s - 1))),
-      1000,
-    );
-    return () => clearInterval(id);
+    let stopped = false;
+    let running = false;
+    const tick = async () => {
+      if (stopped || running || busyRef.current || talkRef.current) return;
+      const board = boardRef.current;
+      if (board.state === 'busy' && Date.now() - board.at < 60_000) {
+        setWatch('waiting');
+        return;
+      }
+      running = true;
+      try {
+        const frame = await grabFrame(cameraRef.current);
+        if (!frame || stopped) return;
+        const w = watchRef.current;
+        const moving = changedPixels(frame, w.prev);
+        w.prev = frame;
+        if (w.ref && moving > MOVING) {
+          setWatch('moving'); // hand or pen on the page: wait until it is still
+          return;
+        }
+        setWatch('watching');
+        const changed = changedPixels(frame, w.ref);
+        const safety = Date.now() - w.lastSent > SAFETY_MS;
+        if (!w.ref || changed > CHANGED || safety) {
+          log('camera', `page ${!w.ref ? 'first look' : safety ? 'safety photo' : `changed (${changed} px)`}`);
+          w.ref = frame;
+          w.lastSent = Date.now();
+          captureRef.current?.();
+        }
+      } catch (e) {
+        log('camera', 'page watch frame failed', (e as Error).message);
+      } finally {
+        running = false;
+      }
+    };
+    const id = setInterval(tick, WATCH_MS);
+    void tick();
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
   }, [active]);
-
-  useEffect(() => {
-    if (active && secondsLeft === 0 && !busyRef.current && !talkRef.current) capture();
-  }, [active, secondsLeft, capture]);
 
   // ---------- push-to-talk: one press to start, one press to stop ----------
   const stopTalk = useCallback(async () => {
@@ -288,7 +360,7 @@ export default function Camera() {
       setDetails(audioInfo);
       log('camera', `talk: stopped, ${audioInfo}, sending to child-talk`);
       const { data, error } = await supabase.functions.invoke('child-talk', {
-        body: { session_id: session.id, audio_b64: b64, mime },
+        body: { session_id: session.id, audio_b64: b64, mime, turn: newTurn('child') },
       });
       if (error) throw new Error(await functionError(error));
       log('camera', 'talk: result', data);
@@ -314,7 +386,7 @@ export default function Camera() {
     } finally {
       setTalk('idle');
       talkRef.current = false;
-      setSecondsLeft(session.capture_interval_s); // no photo right after talking
+      watchRef.current.lastSent = Date.now(); // no safety photo right after talking
     }
   }, [recorder, session]);
 
@@ -342,7 +414,7 @@ export default function Camera() {
     }
   }
 
-  // Safety stop after 45 s.
+  // Safety stop after 90 s.
   useEffect(() => {
     if (talk === 'recording' && recState.durationMillis >= MAX_TALK_MS) stopTalk();
   }, [talk, recState.durationMillis, stopTalk]);
@@ -381,6 +453,21 @@ export default function Camera() {
   async function changeStatus(next: 'active' | 'paused' | 'finished') {
     if (!session) return;
     try {
+      if (next === 'finished') {
+        // Like a teacher: a short recap for her and a report for the parent, BEFORE the session closes
+        // (the Board is still listening to this session).
+        setStatus(`${TUTOR_NAME} fait le bilan…`);
+        try {
+          const { data } = await withTimeout(
+            supabase.functions.invoke('session-summary', { body: { session_id: session.id, turn: newTurn('child') } }),
+            25_000,
+            'Bilan',
+          );
+          log('camera', 'summary', data);
+        } catch (e) {
+          logError('camera', 'summary failed (session closed anyway)', e);
+        }
+      }
       await setSessionStatus(session.id, next);
       log('camera', `session ${next}`);
       if (channelRef.current) sendEvent(channelRef.current, 'session.state', { status: next });
@@ -408,13 +495,15 @@ export default function Camera() {
 
   return (
     <View style={styles.root}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" onCameraReady={() => setReady(true)} />
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" animateShutter={false} onCameraReady={() => setReady(true)} />
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* top: state + small controls */}
         <View style={styles.topBar}>
           <View style={styles.chip}>
             <View style={[styles.dot, { backgroundColor: !session ? colors.muted : paused ? colors.accent : talk === 'recording' ? '#E5484D' : colors.success }]} />
-            {session && !paused && talk === 'idle' ? <Text style={styles.chipText}>{busy ? '…' : `${secondsLeft}s`}</Text> : null}
+            {session && !paused && talk === 'idle' ? (
+              <Text style={styles.chipText}>{busy ? 'J’envoie…' : watch === 'waiting' ? `${TUTOR_NAME} parle` : watch === 'moving' ? 'J’attends…' : 'Je regarde'}</Text>
+            ) : null}
             {talk === 'recording' ? <Text style={styles.chipText}>{recordingSecs}s</Text> : null}
           </View>
           <View style={styles.topActions}>
@@ -429,9 +518,12 @@ export default function Camera() {
                 />
                 <IconButton icon="flag" label="Terminer les devoirs" size={44} onPress={() => changeStatus('finished')} />
               </>
-            ) : (
-              <IconButton icon="unlink" label="Délier cet appareil" size={44} onPress={unpair} />
+            ) : device.viaParent ? null : (
+              <IconButton icon="unlink" label="Délier cet appareil" caption="Délier" size={44} onPress={unpair} />
             )}
+            {device.viaParent ? (
+              <IconButton icon="home" label="Retour à l’espace parent" caption="Parent" size={44} onPress={backToParent} />
+            ) : null}
           </View>
         </View>
 
@@ -499,7 +591,7 @@ export default function Camera() {
                 caption="Photo"
                 size={84}
                 tone="accent"
-                onPress={() => capture()}
+                onPress={() => capture(undefined, undefined, true)}
                 loading={busy}
                 disabled={!ready || talk !== 'idle'}
               />

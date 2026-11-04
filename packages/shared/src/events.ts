@@ -51,6 +51,43 @@ export interface ExerciseFocus {
   at: string;
 }
 
+/** A turn of the conversation. The child's turns may interrupt Silia; automatic ones (a photo) never do. */
+export interface TurnRef {
+  id: string;
+  priority: 'child' | 'auto';
+}
+
+/** Subjects of the evening, read from the homework diary. */
+export type Subject = 'math' | 'french' | 'arabic' | 'english' | 'science' | 'islamic' | 'social' | 'other';
+
+export interface PlanItem {
+  id: string;
+  subject: Subject;
+  /** As written in the diary ("Maths p. 42"). */
+  label: string;
+  status: 'todo' | 'active' | 'done';
+}
+
+export interface SessionPlan {
+  items: PlanItem[];
+  snapshot_id?: string;
+}
+
+/** End of session: what Silia says to the child, and the report for the parent. */
+export interface SessionSummary {
+  child_text: string;
+  parent_text: string;
+  language: string;
+  minutes: number;
+  answers: number;
+  right: number;
+  wrong: number;
+  at: string;
+}
+
+/** What the Board is doing: the Camera takes automatic photos only while it is "watching". */
+export type BoardState = 'watching' | 'busy';
+
 export interface SessionEvents {
   'capture.tick': { next_capture_at: string };
   /** Board "Corriger": ask the Camera to take a photo now and check every answer. */
@@ -60,7 +97,11 @@ export interface SessionEvents {
   /** Camera: the requested photo could not be taken or sent (too dark, error). The Board checks its current photo. */
   'capture.failed': { request_id: string; reason: string };
   'snapshot.new': { snapshot_id: string; storage_path: string };
-  'tutor.thinking': { snapshot_id?: string };
+  'tutor.thinking': { snapshot_id?: string; turn?: TurnRef };
+  /** Board state, sent on every change: Watching or busy (looking, speaking, listening). */
+  'board.state': { state: BoardState };
+  /** The page orientation of this session (set by the first photo, or the Board's rotate button). */
+  'session.rotation': { rotation: 0 | 90 | 180 | 270 };
   /** The server found no readable page on this photo: the Board goes back to the last good one. */
   'snapshot.rejected': { snapshot_id: string; reason: string };
   /** The photo is sideways/upside down: the Board turns it clockwise by this angle. */
@@ -82,6 +123,7 @@ export interface SessionEvents {
     phrase?: string;
     snapshot_id?: string;
     annotations: Annotation[];
+    turn?: TurnRef;
     /** The exercise this message is about. */
     exercise_index?: number;
   };
@@ -92,12 +134,30 @@ export interface SessionEvents {
     phrase?: string;
     audio_url?: string;
     choices: ExerciseChoice[];
+    turn?: TurnRef;
     /** The help waiting for the choice ("explain it" with several exercises on the page). */
     action?: HelpAction;
   };
+  /** What the server saw on a photo, also when Silia stays quiet (so the screens never look frozen). */
+  'analysis.done': {
+    snapshot_id: string;
+    /** Answers read on the page. */
+    read: number;
+    new: number;
+    right: number;
+    wrong: number;
+    /** true: Silia says nothing about this photo. */
+    quiet: boolean;
+    reason?: 'nothing_new' | 'unsure' | 'no_answers' | 'not_checkable' | 'cooldown' | 'no_page' | 'hand_blocking';
+    turn?: TurnRef;
+  };
+  /** The evening's plan changed (diary read, a subject started or finished). */
+  'plan.changed': { plan: SessionPlan };
+  /** A subject is finished: a short break before the next one (the Camera waits, the Board counts down). */
+  'session.break': { seconds: number; next?: string; language: string };
   /** Active exercise changed (voice, tap or the only exercise on the page). null = no focus. */
   'focus.changed': { focus: ExerciseFocus | null; by: 'voice' | 'tap' | 'auto' };
-  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean };
+  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean; turn?: TurnRef };
   'tutor.speaking.end': { message_id: string };
   'child.talk.start': Record<string, never>;
   'child.talk.end': Record<string, never>;

@@ -1,4 +1,6 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { colors } from '@/lib/theme';
 

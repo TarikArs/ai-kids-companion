@@ -119,26 +119,30 @@ export function readingFix(lang: Lang, wordsToFix: string[]): string {
 }
 
 /** "Corriger" answers that are not familiar phrases (generated once, then cached by text). */
-export const CHECK_TEXT: Record<Lang, { allGood: string; cannotCheck: string; noAnswer: string }> = {
+export const CHECK_TEXT: Record<Lang, { allGood: string; cannotCheck: string; noAnswer: string; unsure: string }> = {
   fr: {
     allGood: 'J’ai tout vérifié : tout est juste, bravo !',
     cannotCheck: 'Je ne peux pas vérifier cet exercice seule. Demande à papa ou maman de regarder avec toi.',
     noAnswer: 'Je ne vois pas encore de réponse. Écris ta réponse, puis appuie sur Corriger.',
+    unsure: 'Je n’arrive pas bien à lire ta réponse. Écris un peu plus fort, ou rapproche le téléphone.',
   },
   ar: {
     allGood: 'شفت كلشي: كلشي صحيح، برافو عليك!',
     cannotCheck: 'ما نقدرش نصحح هاد التمرين بوحدي. طلبي من بابا ولا ماما يشوفو معاك.',
     noAnswer: 'مازال ما شفت حتى جواب. كتبي الجواب ديالك، ومن بعد ورّكي على صحّح.',
+    unsure: 'ما قدرتش نقرا الجواب ديالك مزيان. كتبي شوية بالقوة، ولا قرّبي التيليفون.',
   },
   fus: {
     allGood: 'تحققتُ من كل شيء: كل الأجوبة صحيحة، أحسنتِ!',
     cannotCheck: 'لا أستطيع تصحيح هذا التمرين وحدي. اطلبي من أبيكِ أو أمكِ أن ينظرا معكِ.',
     noAnswer: 'لا أرى أي جواب بعد. اكتبي جوابكِ، ثم اضغطي على صحّح.',
+    unsure: 'لا أستطيع قراءة جوابكِ جيدًا. اكتبي بخط أوضح، أو قرّبي الهاتف.',
   },
   en: {
     allGood: 'I checked everything: it is all correct, well done!',
     cannotCheck: 'I can’t check this exercise by myself. Ask mum or dad to look with you.',
     noAnswer: 'I don’t see an answer yet. Write your answer, then press Check.',
+    unsure: 'I can’t read your answer well. Write a bit darker, or bring the phone closer.',
   },
 };
 

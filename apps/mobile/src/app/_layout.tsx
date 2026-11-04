@@ -10,6 +10,7 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const hydrated = useAppStore((s) => s.hydrated);
+  const reloadKey = useAppStore((s) => s.reloadKey);
 
   useEffect(() => {
     if (hydrated) SplashScreen.hideAsync();
@@ -20,7 +21,7 @@ export default function RootLayout() {
   return (
     <>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
+      <Stack key={reloadKey} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
     </>
   );
 }

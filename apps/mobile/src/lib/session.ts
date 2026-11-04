@@ -86,3 +86,8 @@ export function base64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+
+/** A new conversation turn: the child's turns may interrupt Silia, automatic ones never do. */
+export function newTurn(priority: 'child' | 'auto'): { id: string; priority: 'child' | 'auto' } {
+  return { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, priority };
+}

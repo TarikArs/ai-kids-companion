@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { RoleArt } from '@/components/illustrations';
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';

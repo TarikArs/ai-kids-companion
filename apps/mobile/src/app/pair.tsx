@@ -66,7 +66,14 @@ export default function Pair() {
         <ErrorText>{error}</ErrorText>
         <Button label="Relier" onPress={claim} loading={busy} disabled={code.length !== 6} />
       </Card>
-      <Button label="Changer de rôle" variant="ghost" onPress={() => setRole(null)} />
+      <Button
+        label="Changer d’appareil"
+        variant="ghost"
+        onPress={() => {
+          setRole(null);
+          router.replace('/');
+        }}
+      />
     </Screen>
   );
 }

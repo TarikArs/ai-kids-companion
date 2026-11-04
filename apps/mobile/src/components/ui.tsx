@@ -1,14 +1,7 @@
 import type { ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type TextInputProps,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radius, space } from '@/lib/theme';

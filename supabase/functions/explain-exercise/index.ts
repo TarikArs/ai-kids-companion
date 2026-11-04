@@ -15,7 +15,7 @@ import { makeLog } from '../_shared/log.ts';
 import { decide, HELP_ACTIONS, type HelpAction, type Intent } from '../_shared/intent.ts';
 import { execute, loadFocus, type HelpCtx } from '../_shared/help.ts';
 import { latestSnapshot, pageContext } from '../_shared/page.ts';
-import { broadcast } from '../_shared/broadcast.ts';
+import { broadcast, parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
@@ -41,8 +41,10 @@ Deno.serve(async (req) => {
   const child = session.children as { tutor_language?: string; grade?: number } | null;
   const gradeNum = Number(child?.grade ?? 1);
   const topic = `session:${session.id}`;
+  const turn = parseTurn((body as { turn?: unknown }).turn);
+  const send = turnSender(topic, turn);
   const started = Date.now();
-  broadcast(topic, 'tutor.thinking', {});
+  send('tutor.thinking', {});
 
   try {
     const [snap, { focus, pending }] = await Promise.all([latestSnapshot(session.id), loadFocus(session.id)]);
@@ -51,6 +53,7 @@ Deno.serve(async (req) => {
     const c: HelpCtx = {
       session: { id: session.id, household_id: session.household_id },
       topic,
+      turn,
       grade,
       advanced: gradeNum >= 4,
       setting: child?.tutor_language,
@@ -82,7 +85,7 @@ Deno.serve(async (req) => {
     return json({ ...outcome, ms: Date.now() - started });
   } catch (e) {
     console.error(e);
-    broadcast(topic, 'tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
+    send('tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
     return json({ error: (e as Error).message }, 500);
   }
 });

@@ -1,6 +1,8 @@
 import type { AppRole } from '@hc/shared';
 import { Redirect } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { RoleArt } from '@/components/illustrations';
 import { Screen } from '@/components/ui';
@@ -32,9 +34,10 @@ export default function Home() {
         <Text style={styles.question}>Cet appareil sera…</Text>
       </View>
       <View style={{ gap: space.md }}>
-        {ROLES.map((r) => (
+        {ROLES.map((r, i) => (
           <Pressable
             key={r.role}
+            preferFocus={i === 0}
             accessibilityRole="button"
             accessibilityLabel={`${r.title}. ${r.text}`}
             onPress={() => setRole(r.role)}

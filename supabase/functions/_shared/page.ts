@@ -143,6 +143,48 @@ export async function pageContext(
   return ctx;
 }
 
+/**
+ * Printed text of the page, for reading aloud. The automatic reading does not extract it (it would slow every photo):
+ * read once, the first time she reads this page aloud, then cached.
+ */
+export async function pageText(snap: SnapshotRow, background: (p: Promise<unknown>) => unknown): Promise<string> {
+  if (snap.page_text) return snap.page_text;
+  if (snap.exercises?.text) return snap.exercises.text;
+  const b64 = await downloadB64(snap.storage_path);
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}` },
+    body: JSON.stringify({
+      model: MODEL,
+      reasoning_effort: 'low',
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Transcribe the printed text of this homework page exactly as written, in reading order (Arabic stays in Arabic script), keeping punctuation. The photo may be sideways. No translation, no comments, ignore handwriting. Return JSON only: {"lang":"fr|ar|en","text":"..."}',
+            },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' } },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) return '';
+  const out = JSON.parse((await res.json()).choices[0].message.content);
+  const text = String(out.text ?? '');
+  const lang = String(out.lang ?? 'fr');
+  background(
+    (async () => {
+      await admin.from('snapshots').update({ page_text: text, page_lang: lang }).eq('id', snap.id);
+      if (snap.exercises) await admin.from('snapshots').update({ exercises: { ...snap.exercises, text } }).eq('id', snap.id);
+    })(),
+  );
+  return text;
+}
+
 /** Latest photo of the session with a readable page (analyzed first, else one still being analyzed). */
 export async function latestSnapshot(sessionId: string): Promise<(SnapshotRow & { taken_at: string }) | null> {
   const get = async (statuses: string[], withExercises: boolean) =>

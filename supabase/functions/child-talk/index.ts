@@ -10,14 +10,14 @@
 //    the named or ACTIVE exercise, ask which exercise or what help when it is ambiguous, or answer a follow-up.
 //    The active exercise stays the focus until she names another one or taps another choice.
 
-import { broadcast } from '../_shared/broadcast.ts';
+import { broadcast, parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { corsHeaders, json } from '../_shared/cors.ts';
-import { gradeLabel, PHRASES, readingFix, tutorLang } from '../_shared/language.ts';
-import { checkReading } from '../_shared/reading.ts';
+import { gradeLabel, PHRASES, readingFix, tutorLang, type Lang } from '../_shared/language.ts';
+import { checkReading, normalizeWord, similar, words } from '../_shared/reading.ts';
 import { makeLog } from '../_shared/log.ts';
 import { decide, looksLikeCommand, quickIntent } from '../_shared/intent.ts';
 import { classify, execute, loadFocus, type HelpCtx } from '../_shared/help.ts';
-import { latestSnapshot, pageContext, type PageContext } from '../_shared/page.ts';
+import { latestSnapshot, pageContext, pageText, type PageContext } from '../_shared/page.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
 import { phrasePath, speechUrl } from '../_shared/tts.ts';
 import { decodeBase64 } from 'jsr:@std/encoding@1/base64';
@@ -30,6 +30,23 @@ const STT_MODEL = Deno.env.get('OPENAI_STT_MODEL') ?? 'gpt-4o-mini-transcribe';
 const MAX_AUDIO_BYTES = 3_000_000; // ~45 s of compressed speech is far below this
 
 const pick = <T>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
+
+/** After a long reading, like a teacher: check she understood. */
+const RETELL: Record<Lang, string> = {
+  fr: 'Maintenant, dis-moi avec tes mots : qu’est-ce qui se passe dans le texte ?',
+  ar: 'دابا عاودي ليا بكلامك: شنو وقع فالنص؟',
+  fus: 'والآن، أخبريني بكلماتكِ: ماذا يحدث في النص؟',
+  en: 'Now tell me in your own words: what happens in the text?',
+};
+/** She repeated the word Silia asked for. */
+const REPEAT_OK: Record<Lang, string> = {
+  fr: 'Voilà, c’est parfait !',
+  ar: 'هي هاديك، مزيان!',
+  fus: 'أحسنتِ، هكذا تمامًا!',
+  en: 'That’s it, perfect!',
+};
+/** Words read in one go before Silia asks her to retell the text. */
+const RETELL_AFTER_WORDS = 15;
 
 async function transcribe(audio: Uint8Array, mime: string, lang?: string): Promise<string> {
   const form = new FormData();
@@ -54,7 +71,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const { session_id, audio_b64, mime } = (await req.json().catch(() => ({}))) as {
+  const reqBody = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const { session_id, audio_b64, mime } = reqBody as {
     session_id?: unknown;
     audio_b64?: unknown;
     mime?: unknown;
@@ -79,9 +97,11 @@ Deno.serve(async (req) => {
   const grade = gradeLabel(child?.grade);
   log('start', { session: session.id, audio_bytes: audio.byteLength, mime, grade });
   const topic = `session:${session.id}`;
+  const turn = parseTurn(reqBody.turn);
+  const send = turnSender(topic, turn);
   const started = Date.now();
   const t: Record<string, number> = {};
-  broadcast(topic, 'tutor.thinking', {});
+  send('tutor.thinking', {});
 
   try {
     const [snap, { focus, pending }] = await Promise.all([latestSnapshot(session.id), loadFocus(session.id)]);
@@ -120,21 +140,48 @@ Deno.serve(async (req) => {
         }),
       ),
     );
-    broadcast(topic, 'child.transcript', { utterance_id: crypto.randomUUID(), text: transcript });
+    send('child.transcript', { utterance_id: crypto.randomUUID(), text: transcript });
 
     if (!transcript) {
-      broadcast(topic, 'tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language, annotations: [] });
+      send('tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language, annotations: [] });
       return json({ mode: 'empty', transcript, note: `transcription vide (${audio.byteLength} octets reçus)`, ms: Date.now() - started });
+    }
+
+    // "Répète avec moi : dormait" -> she says the word: confirmed in code, no AI.
+    const spoken = words(transcript);
+    if (spoken.length <= 4) {
+      const { data: lastFix } = await admin
+        .from('tutor_messages')
+        .select('action, created_at')
+        .eq('session_id', session.id)
+        .like('action', 'reading_fix:%')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const word = lastFix && Date.now() - Date.parse(lastFix.created_at) < 3 * 60_000 ? String(lastFix.action).slice('reading_fix:'.length) : '';
+      if (word && spoken.some((w) => similar(w.norm, normalizeWord(word)))) {
+        const text = REPEAT_OK[language];
+        const audioUrl = await speechUrl(text, language);
+        await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'praise', text, language, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
+        log('decision', { mode: 'repeat', word, ok: true });
+        return json({ mode: 'repeat', transcript, text, ms: Date.now() - started });
+      }
     }
 
     // A command to Silia ("explique l'exercice 2") is never treated as reading, even if its words are on the page.
     const command = looksLikeCommand(transcript);
+    // The printed text is read only the first time she talks about this page (not on every photo).
+    if (!command && page && !page.text && snap) {
+      page.text = await pageText(snap, inBackground).catch(() => '');
+      t.page_text_ms = Date.now() - started - t.stt_and_page_ms;
+    }
     const reading = !command && page?.text ? checkReading(page.text, transcript) : null;
 
     if (!reading?.isReading) {
       const c: HelpCtx = {
         session: { id: session.id, household_id: session.household_id },
         topic,
+        turn,
         grade,
         advanced: Number(child?.grade ?? 1) >= 4,
         setting: child?.tutor_language,
@@ -155,6 +202,7 @@ Deno.serve(async (req) => {
     let kind: 'praise' | 'hint';
     let text: string;
     let familiar = false;
+    let fixWord = '';
     const mode = 'reading';
     {
       const toFix = [
@@ -162,7 +210,7 @@ Deno.serve(async (req) => {
         ...reading.skipped.filter((w) => w.length > 2),
       ]
         .filter((w, i, all) => w && all.indexOf(w) === i)
-        .slice(0, 2);
+        .slice(0, 1); // one word to work on, never a list of mistakes
       if (!toFix.length || reading.accuracy >= 0.97) {
         kind = 'praise';
         text = pick(PHRASES[language].read_good);
@@ -170,6 +218,12 @@ Deno.serve(async (req) => {
       } else {
         kind = 'hint';
         text = readingFix(language, toFix);
+      }
+      fixWord = toFix[0] ?? '';
+      // A real passage read in one go: ask her to retell it (the next turn checks her understanding).
+      if (reading.matched >= RETELL_AFTER_WORDS) {
+        text = `${text} ${RETELL[language]}`;
+        familiar = false;
       }
     }
 
@@ -182,7 +236,7 @@ Deno.serve(async (req) => {
     const phrase = familiar ? await phrasePath(text, language) : null;
     const audioUrl = familiar ? null : await speechUrl(text, language);
     const messageId = crypto.randomUUID();
-    await broadcast(topic, 'tutor.say', {
+    await send('tutor.say', {
       message_id: messageId,
       kind,
       text,
@@ -192,16 +246,12 @@ Deno.serve(async (req) => {
       annotations: [],
     });
     inBackground(
-      Promise.resolve(
-        admin.from('tutor_messages').insert({
-          id: messageId,
-          household_id: session.household_id,
-          session_id: session.id,
-          kind,
-          text,
-          language,
-        }),
-      ),
+      (async () => {
+        const row = { id: messageId, household_id: session.household_id, session_id: session.id, kind, text, language };
+        // The word to repeat is remembered: her next turn ("dormait") is checked against it.
+        const res = await admin.from('tutor_messages').insert({ ...row, ...(fixWord && kind === 'hint' ? { action: `reading_fix:${fixWord}` } : {}) });
+        if (res.error && fixWord) await admin.from('tutor_messages').insert(row);
+      })(),
     );
 
     return json({
@@ -216,7 +266,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error(e);
-    broadcast(topic, 'tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
+    send('tutor.say', { message_id: crypto.randomUUID(), kind: 'system', text: '', language: 'fr', annotations: [] });
     return json({ error: (e as Error).message }, 500);
   }
 });
