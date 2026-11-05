@@ -1,0 +1,83 @@
+{
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "effort": "minimal",
+  "runs": 1,
+  "photos": [
+    {
+      "photo": "photo-01-nombres-en-lettres.jpg",
+      "ms": [
+        555
+      ],
+      "errors": [
+        "HTTP 400: {\n  \"error\": {\n    \"message\": \"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"reasoning_effort\",\n    \"code\": \"unsupported_value\"\n  }\n}"
+      ],
+      "usages": [],
+      "outputs": [
+        {
+          "items": []
+        }
+      ]
+    },
+    {
+      "photo": "photo-02-dizaines.jpg",
+      "ms": [
+        297
+      ],
+      "errors": [
+        "HTTP 400: {\n  \"error\": {\n    \"message\": \"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"reasoning_effort\",\n    \"code\": \"unsupported_value\"\n  }\n}"
+      ],
+      "usages": [],
+      "outputs": [
+        {
+          "items": []
+        }
+      ]
+    },
+    {
+      "photo": "photo-03-soustractions-additions.jpg",
+      "ms": [
+        326
+      ],
+      "errors": [
+        "HTTP 400: {\n  \"error\": {\n    \"message\": \"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"reasoning_effort\",\n    \"code\": \"unsupported_value\"\n  }\n}"
+      ],
+      "usages": [],
+      "outputs": [
+        {
+          "items": []
+        }
+      ]
+    },
+    {
+      "photo": "photo-04-nombre-8.jpg",
+      "ms": [
+        265
+      ],
+      "errors": [
+        "HTTP 400: {\n  \"error\": {\n    \"message\": \"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"reasoning_effort\",\n    \"code\": \"unsupported_value\"\n  }\n}"
+      ],
+      "usages": [],
+      "outputs": [
+        {
+          "items": []
+        }
+      ]
+    },
+    {
+      "photo": "photo-05-ecriture-chiffres.jpg",
+      "ms": [
+        264
+      ],
+      "errors": [
+        "HTTP 400: {\n  \"error\": {\n    \"message\": \"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"reasoning_effort\",\n    \"code\": \"unsupported_value\"\n  }\n}"
+      ],
+      "usages": [],
+      "outputs": [
+        {
+          "items": []
+        }
+      ]
+    }
+  ]
+}

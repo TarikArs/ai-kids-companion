@@ -1,0 +1,453 @@
+{
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "effort": "low",
+  "runs": 1,
+  "photos": [
+    {
+      "photo": "photo-01-nombres-en-lettres.jpg",
+      "ms": [
+        11775
+      ],
+      "errors": [],
+      "usages": [
+        {
+          "prompt_tokens": 3261,
+          "completion_tokens": 1014,
+          "total_tokens": 4275,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 712,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "items": [
+            {
+              "id": "p1-15",
+              "child_answer": "quinze",
+              "confidence": 0.99
+            },
+            {
+              "id": "p1-24",
+              "child_answer": "vingt-quatre",
+              "confidence": 0.82
+            },
+            {
+              "id": "p1-53",
+              "child_answer": "cinquante-trois",
+              "confidence": 0.96
+            },
+            {
+              "id": "p1-79",
+              "child_answer": "soixante-dix-neuf",
+              "confidence": 0.81
+            },
+            {
+              "id": "p1-91",
+              "child_answer": "quatre-vingt-onze",
+              "confidence": 0.68
+            },
+            {
+              "id": "p1-44",
+              "child_answer": "quarante-quatre",
+              "confidence": 0.93
+            },
+            {
+              "id": "p1-67",
+              "child_answer": "soixante-sept",
+              "confidence": 0.96
+            },
+            {
+              "id": "p1-18",
+              "child_answer": "dix-huit",
+              "confidence": 0.85
+            },
+            {
+              "id": "p1-80",
+              "child_answer": "quatre-vingts",
+              "confidence": 0.94
+            },
+            {
+              "id": "p1-42",
+              "child_answer": "quarante-deux",
+              "confidence": 0.95
+            },
+            {
+              "id": "p1-86",
+              "child_answer": null,
+              "confidence": 0.42
+            },
+            {
+              "id": "p1-31",
+              "child_answer": "trente-et-un",
+              "confidence": 0.83
+            }
+          ],
+          "page_notes": "The photo is clear overall, but the lowest word is cut off at the right edge."
+        }
+      ]
+    },
+    {
+      "photo": "photo-02-dizaines.jpg",
+      "ms": [
+        8104
+      ],
+      "errors": [],
+      "usages": [
+        {
+          "prompt_tokens": 3286,
+          "completion_tokens": 626,
+          "total_tokens": 3912,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 349,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "items": [
+            {
+              "id": "p2-10",
+              "child_answer": "10, 10, 10",
+              "confidence": 0.94
+            },
+            {
+              "id": "p2-20",
+              "child_answer": "20, 20, 20",
+              "confidence": 0.84
+            },
+            {
+              "id": "p2-30",
+              "child_answer": "30, 30, 20",
+              "confidence": 0.63
+            },
+            {
+              "id": "p2-40",
+              "child_answer": "40, 40, 40",
+              "confidence": 0.82
+            },
+            {
+              "id": "p2-50",
+              "child_answer": "50, 50, 50",
+              "confidence": 0.94
+            },
+            {
+              "id": "p2-60",
+              "child_answer": "66, 60, 60",
+              "confidence": 0.57
+            },
+            {
+              "id": "p2-70",
+              "child_answer": "70, 70, 70",
+              "confidence": 0.87
+            },
+            {
+              "id": "p2-80",
+              "child_answer": "80, 80, 80",
+              "confidence": 0.92
+            },
+            {
+              "id": "p2-90",
+              "child_answer": "90, 90, 90",
+              "confidence": 0.92
+            },
+            {
+              "id": "p2-100",
+              "child_answer": "100, 100, 100",
+              "confidence": 0.9
+            }
+          ],
+          "page_notes": "The full page is visible, though some pencil digits are faint and loosely formed."
+        }
+      ]
+    },
+    {
+      "photo": "photo-03-soustractions-additions.jpg",
+      "ms": [
+        6922
+      ],
+      "errors": [],
+      "usages": [
+        {
+          "prompt_tokens": 3534,
+          "completion_tokens": 768,
+          "total_tokens": 4302,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 347,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "items": [
+            {
+              "id": "p3-s1",
+              "child_answer": "4",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-s2",
+              "child_answer": "6",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-s3",
+              "child_answer": null,
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-s4",
+              "child_answer": "4",
+              "confidence": 0.88
+            },
+            {
+              "id": "p3-s5",
+              "child_answer": "5",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-s6",
+              "child_answer": null,
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-s7",
+              "child_answer": "2",
+              "confidence": 0.91
+            },
+            {
+              "id": "p3-s8",
+              "child_answer": "2",
+              "confidence": 0.96
+            },
+            {
+              "id": "p3-s9",
+              "child_answer": null,
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-a1",
+              "child_answer": "4",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-a2",
+              "child_answer": "3",
+              "confidence": 0.94
+            },
+            {
+              "id": "p3-a3",
+              "child_answer": "6",
+              "confidence": 0.94
+            },
+            {
+              "id": "p3-a4",
+              "child_answer": "5",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-a5",
+              "child_answer": "2",
+              "confidence": 0.9
+            },
+            {
+              "id": "p3-a6",
+              "child_answer": "1",
+              "confidence": 0.92
+            },
+            {
+              "id": "p3-a7",
+              "child_answer": "5",
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-a8",
+              "child_answer": "4",
+              "confidence": 0.95
+            },
+            {
+              "id": "p3-a9",
+              "child_answer": null,
+              "confidence": 0.99
+            },
+            {
+              "id": "p3-a10",
+              "child_answer": "6",
+              "confidence": 0.98
+            },
+            {
+              "id": "p3-a11",
+              "child_answer": "3",
+              "confidence": 0.98
+            },
+            {
+              "id": "p3-a12",
+              "child_answer": null,
+              "confidence": 0.99
+            }
+          ],
+          "page_notes": "The writing is mostly legible, but several answers in the right column are cut off by the photo edge."
+        }
+      ]
+    },
+    {
+      "photo": "photo-04-nombre-8.jpg",
+      "ms": [
+        6198
+      ],
+      "errors": [],
+      "usages": [
+        {
+          "prompt_tokens": 3296,
+          "completion_tokens": 483,
+          "total_tokens": 3779,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 267,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "items": [
+            {
+              "id": "p4-line3",
+              "child_answer": "3",
+              "confidence": 0.96
+            },
+            {
+              "id": "p4-line4",
+              "child_answer": "4",
+              "confidence": 0.85
+            },
+            {
+              "id": "p4-line6",
+              "child_answer": "6",
+              "confidence": 0.94
+            },
+            {
+              "id": "p4-line7",
+              "child_answer": "7",
+              "confidence": 0.93
+            },
+            {
+              "id": "p4-teacher4",
+              "child_answer": "yes",
+              "confidence": 0.93
+            },
+            {
+              "id": "p4-cross6",
+              "child_answer": "6",
+              "confidence": 0.78
+            },
+            {
+              "id": "p4-cross7",
+              "child_answer": "7",
+              "confidence": 0.67
+            },
+            {
+              "id": "p4-cross8",
+              "child_answer": "7",
+              "confidence": 0.38
+            },
+            {
+              "id": "p4-dots6",
+              "child_answer": "6",
+              "confidence": 0.8
+            },
+            {
+              "id": "p4-dots7",
+              "child_answer": "7",
+              "confidence": 0.58
+            }
+          ],
+          "page_notes": "The photo is slightly blurry, especially around the drawn marks."
+        }
+      ]
+    },
+    {
+      "photo": "photo-05-ecriture-chiffres.jpg",
+      "ms": [
+        6329
+      ],
+      "errors": [],
+      "usages": [
+        {
+          "prompt_tokens": 3139,
+          "completion_tokens": 519,
+          "total_tokens": 3658,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 377,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "items": [
+            {
+              "id": "p5-row1",
+              "child_answer": "none",
+              "confidence": 0.99
+            },
+            {
+              "id": "p5-row2",
+              "child_answer": "1,2,3",
+              "confidence": 0.78
+            },
+            {
+              "id": "p5-row3",
+              "child_answer": "none",
+              "confidence": 0.98
+            },
+            {
+              "id": "p5-row4",
+              "child_answer": "1,2,3,4",
+              "confidence": 0.82
+            },
+            {
+              "id": "p5-row5",
+              "child_answer": "2,3,4",
+              "confidence": 0.72
+            }
+          ],
+          "page_notes": "The page is slightly blurry and the rightmost copies are close to the image edge."
+        }
+      ]
+    }
+  ]
+}

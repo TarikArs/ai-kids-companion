@@ -2,13 +2,14 @@ import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction, SessionEven
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui';
 import { AnnotatedPhoto } from '@/features/board/annotated-photo';
+import { PracticeBoard, type PracticeView } from '@/features/board/practice-board';
 import { Avatar, type AvatarMood, type AvatarReaction } from '@/features/board/avatar';
 import { findOpenSession, newTurn, onEvent, sendEvent, sessionChannel, type HomeworkSession } from '@/lib/session';
 import { useAppStore } from '@/lib/store';
@@ -16,7 +17,7 @@ import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
 import { useUnpair } from '@/lib/use-unpair';
 import { log } from '@/lib/log';
-import { ACTION_LABEL, exerciseName, loadFocus, requestHelp } from '@/lib/exercise';
+import { ACTION_LABEL, exerciseName, loadFocus, requestHelp, sendTyped } from '@/lib/exercise';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { loadPhrases, pickPhrase } from '@/lib/phrases';
 import { onVoiceIssue, playVoice, stopVoice } from '@/lib/voice';
@@ -70,10 +71,10 @@ function seenText(p: SessionEvents['analysis.done']): string {
 export default function Board() {
   useKeepAwake();
   const device = useAppStore((s) => s.device);
-  const muted = useAppStore((s) => s.muted);
-  const setMuted = useAppStore((s) => s.setMuted);
-  const mutedRef = useRef(muted);
-  mutedRef.current = muted;
+  /** Parent setting (Espace parent → Voix de Silia). Off = text only, and the server sends no audio at all. */
+  const [voiceOn, setVoiceOn] = useState(true);
+  const mutedRef = useRef(false);
+  mutedRef.current = !voiceOn;
   const unpair = useUnpair();
   const { width, height } = useWindowDimensions();
   const landscape = width >= height;
@@ -130,6 +131,10 @@ export default function Board() {
 
   // The evening's plan (from the homework diary) and the break between subjects.
   const [plan, setPlan] = useState<SessionPlan | null>(null);
+  /** "Exercice similaire": the practice exercise shown on the Board (questions only; answers stay on the server). */
+  const [practice, setPractice] = useState<PracticeView | null>(null);
+  /** The chalkboard shows the practice exercise (true) or the notebook photo (false). */
+  const [practiceView, setPracticeView] = useState(true);
   const [breakLeft, setBreakLeft] = useState(0);
   const breakRef = useRef<{ seconds: number; next?: string; language: string } | null>(null);
   const breakNextRef = useRef<{ next?: string; language: string } | null>(null);
@@ -294,6 +299,11 @@ export default function Board() {
           { event: 'UPDATE', schema: 'public', table: 'children', filter: `household_id=eq.${device.householdId}` },
           () => settingsChangedRef.current(),
         )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'households', filter: `id=eq.${device.householdId}` },
+          () => settingsChangedRef.current(),
+        )
         .subscribe();
     })();
     return () => {
@@ -357,7 +367,21 @@ export default function Board() {
         .limit(1)
         .maybeSingle();
       if (latest && !cancelled) loadPhoto(latest.id);
-      loadFocus(sessionId).then((f) => !cancelled && setFocus(f));
+      loadFocus(sessionId).then((f) => {
+        if (cancelled) return;
+        setFocus(f);
+        if (f?.practice) {
+          setPractice({
+            index: f.index,
+            title: f.practice.title,
+            instr: f.practice.instr,
+            kind: f.practice.kind,
+            items: f.practice.items.map((i) => ({ q: i.q, m: i.m, slots: i.slots })),
+            language: lastVoiceRef.current.language ?? 'fr',
+          });
+          setPracticeView(false); // after a reload: the photo first, the exercise one tap away
+        }
+      });
       supabase
         .from('homework_sessions')
         .select('rotation')
@@ -398,6 +422,10 @@ export default function Board() {
       });
       onEvent(ch, 'session.rotation', (p) => setSessionRotation(p.rotation));
       onEvent(ch, 'plan.changed', (p) => setPlan(p.plan));
+      onEvent(ch, 'practice.show', (p) => {
+        setPractice({ index: p.exercise_index, title: p.title, instr: p.instr, kind: p.kind, items: p.items, language: p.language });
+        setPracticeView(true); // written on the chalkboard, in place of the photo
+      });
       onEvent(ch, 'session.break', (p) => {
         breakRef.current = p; // starts when Silia has finished her sentence
         if (moodRef.current === 'idle' && !speakingRef.current) afterTurnRef.current();
@@ -405,6 +433,8 @@ export default function Board() {
       onEvent(ch, 'focus.changed', (p) => {
         log('board', `active exercise: ${p.focus ? `${exerciseName(p.focus)} ${p.focus.title}` : 'none'} (${p.by})`);
         setFocus(p.focus);
+        // Another exercise: its practice exercise is no longer relevant.
+        setPractice((cur) => (cur && cur.index !== p.focus?.index ? null : cur));
         setChoices([]);
       });
       onEvent(ch, 'capture.ack', (p) => {
@@ -473,6 +503,8 @@ export default function Board() {
         shownRef.current.add(p.message_id);
         greetingShownRef.current = false;
         if (p.snapshot_id && p.snapshot_id !== photoIdRef.current) await loadPhoto(p.snapshot_id);
+        // Silia marks her sheet (ticks, circles): show the photo, the exercise stays one tap away.
+        if (p.annotations.length) setPracticeView(false);
         setAnnotations(p.annotations);
         setChoices([]);
         if (p.kind === 'praise' || p.kind === 'hint' || p.kind === 'explain') setReaction({ type: p.kind, at: Date.now() });
@@ -549,7 +581,15 @@ export default function Board() {
         setReaction({ type: 'hint', at: Date.now() });
         speak(p.text, { language: p.language, phrase: p.phrase, audioUrl: p.audio_url });
       });
-      onEvent(ch, 'board.annotate', (p) => {
+      onEvent(ch, 'board.annotate', async (p) => {
+        if (p.keep_mood) {
+          // Marks ahead of the sentence: shown now on that photo, Silia keeps "thinking" until she speaks.
+          if (mustWait(p.turn)) return;
+          if (p.snapshot_id !== photoIdRef.current) await loadPhoto(p.snapshot_id);
+          setPracticeView(false);
+          setAnnotations(p.annotations);
+          return;
+        }
         if (sameTurn(p.turn) && !speakingRef.current) setMood('idle');
         setAnnotations((cur) => (p.clear ? p.annotations : [...cur, ...p.annotations]));
       });
@@ -580,6 +620,18 @@ export default function Board() {
   // The tutor's language before any message: the parent's choice, or (auto) the last language she spoke.
   const loadLanguage = useCallback(async () => {
     if (!device) return 'fr';
+    // Voice setting of the household (checked with the language: live on change, and every 10 s).
+    const { data: home, error: homeErr } = await supabase.from('households').select('voice_enabled').eq('id', device.householdId).maybeSingle();
+    if (!homeErr && home) {
+      const on = (home as { voice_enabled?: boolean }).voice_enabled !== false;
+      setVoiceOn((cur) => {
+        if (cur !== on) {
+          log('board', `voice ${on ? 'on' : 'off'} (parent setting)`);
+          if (!on) stopVoice();
+        }
+        return on;
+      });
+    }
     const { data: child } = await supabase
       .from('children')
       .select('tutor_language')
@@ -694,6 +746,21 @@ export default function Board() {
   }
   checkBoardPhotoRef.current = (why) => void checkBoardPhoto(why);
 
+  /** Typed answer on the Board ("8"): same path as speaking to Silia. */
+  const [typed, setTyped] = useState('');
+  async function sendAnswer() {
+    const text = typed.trim();
+    if (!session || !text) return;
+    const turn = childTurn();
+    setTyped('');
+    setMood('thinking');
+    const { error } = await sendTyped(session.id, text, turn);
+    if (error) {
+      setMood('idle');
+      setLink(`réponse : ${error}`);
+    }
+  }
+
   /** Exercise help (buttons and choice taps): same server logic as the child's voice requests. */
   async function explainExercise(choice?: ExerciseChoice, action?: HelpAction | 'choose') {
     if (!session) return;
@@ -755,7 +822,9 @@ export default function Board() {
       <View style={[styles.main, { flexDirection: landscape ? 'row' : 'column' }]}>
         <View style={[styles.wood, { flex: landscape ? 3 : 2 }]}>
           <View style={styles.chalkboard}>
-            {photo ? (
+            {practice && practiceView ? (
+              <PracticeBoard practice={practice} />
+            ) : photo ? (
               <>
                 <AnnotatedPhoto
                   uri={photo.uri}
@@ -764,13 +833,31 @@ export default function Board() {
                   rotation={sessionRotation ?? photo.rotation}
                   annotations={shown}
                 />
-                <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={styles.rotate}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={[styles.rotate, practice ? { top: 64 } : null]}>
                   <Text style={styles.rotateText}>↻</Text>
                 </Pressable>
               </>
             ) : (
               <Text style={styles.chalkText}>J’attends la première photo du cahier…</Text>
             )}
+            {practice ? (
+              <View style={styles.boardTabs}>
+                <Pressable accessibilityRole="button" onPress={() => setPracticeView((v) => !v)} style={styles.boardTab}>
+                  <Text style={styles.boardTabText}>{practiceView ? 'Voir la photo' : 'Voir l’exercice'}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Fermer l’exercice similaire"
+                  onPress={() => {
+                    setPractice(null);
+                    setPracticeView(true);
+                  }}
+                  style={styles.boardTab}
+                >
+                  <Text style={styles.boardTabText}>Fermer</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -818,7 +905,7 @@ export default function Board() {
                 </Pressable>
               </View>
               <View style={styles.focusActions}>
-                {(['explain', 'solve', 'correct'] as const).map((a) => (
+                {(['explain', 'solve', 'correct', 'similar'] as const).map((a) => (
                   <Pressable
                     key={a}
                     accessibilityRole="button"
@@ -866,6 +953,23 @@ export default function Board() {
               {bubble}
             </Text>
           </View>
+          {session ? (
+            <View style={styles.answerRow}>
+              <TextInput
+                value={typed}
+                onChangeText={setTyped}
+                placeholder="Écris ta réponse…"
+                placeholderTextColor={colors.muted}
+                returnKeyType="send"
+                onSubmitEditing={sendAnswer}
+                style={styles.answerInput}
+                maxLength={200}
+              />
+              <Pressable accessibilityRole="button" accessibilityLabel="Envoyer ma réponse" onPress={sendAnswer} disabled={!typed.trim()} style={[styles.answerSend, !typed.trim() && { opacity: 0.5 }]}>
+                <Text style={styles.answerSendText}>Envoyer</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={{ flex: landscape ? 1 : 0.8, width: '100%', alignItems: 'center', justifyContent: 'center' }}>
             <Avatar mood={mood} reaction={reaction} language={bubbleLang} />
             <Text style={styles.nameTag}>{TUTOR_NAME}</Text>
@@ -877,14 +981,6 @@ export default function Board() {
         <Button label="Corriger" onPress={correct} disabled={!session || session.status !== 'active'} />
         <Button label="Explique-moi" onPress={() => explainExercise()} loading={explaining} disabled={!session || !photo} />
         <Button label="Répéter" variant="secondary" onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
-        <Button
-          label={muted ? 'Son : coupé' : 'Son : activé'}
-          variant="secondary"
-          onPress={() => {
-            if (!muted) stopVoice();
-            setMuted(!muted);
-          }}
-        />
         {Platform.OS === 'web' ? <Button label="Plein écran" variant="secondary" onPress={fullscreen} /> : null}
         <Button label="Recharger" variant="secondary" onPress={reload} />
         <Button label="Délier" variant="ghost" onPress={unpair} />
@@ -1015,6 +1111,23 @@ const styles = StyleSheet.create({
   focusAction: { paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.08)' },
   focusActionOn: { backgroundColor: '#7FD3FF33', borderWidth: 2, borderColor: '#7FD3FF' },
   focusActionText: { color: colors.text, fontWeight: '800', fontSize: 15 },
+  answerRow: { alignSelf: 'stretch', flexDirection: 'row', gap: space.sm, alignItems: 'center' },
+  answerInput: {
+    flex: 1,
+    minHeight: 52,
+    backgroundColor: colors.surface,
+    color: colors.text,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.lg,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  answerSend: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: space.lg, minHeight: 52, justifyContent: 'center' },
+  answerSendText: { color: colors.onAccent, fontSize: 18, fontWeight: '900' },
+  boardTabs: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', gap: 8 },
+  boardTab: { backgroundColor: 'rgba(27,35,64,0.8)', borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.sm },
+  boardTabText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  rtl: { writingDirection: 'rtl', textAlign: 'right' },
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, flexWrap: 'wrap' },
   nameTag: {
     color: colors.text,

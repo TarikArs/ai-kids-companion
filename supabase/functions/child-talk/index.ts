@@ -14,7 +14,7 @@ import { broadcast, parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { corsHeaders, json } from '../_shared/cors.ts';
 import { gradeLabel, PHRASES, readingFix, tutorLang, type Lang } from '../_shared/language.ts';
 import { checkReading, normalizeWord, similar, words } from '../_shared/reading.ts';
-import { makeLog } from '../_shared/log.ts';
+import { logTurn, makeLog } from '../_shared/log.ts';
 import { decide, looksLikeCommand, quickIntent } from '../_shared/intent.ts';
 import { classify, execute, loadFocus, type HelpCtx } from '../_shared/help.ts';
 import { latestSnapshot, pageContext, pageText, type PageContext } from '../_shared/page.ts';
@@ -72,17 +72,20 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   const reqBody = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const { session_id, audio_b64, mime } = reqBody as {
+  const { session_id, audio_b64, mime, text: typedRaw } = reqBody as {
     session_id?: unknown;
     audio_b64?: unknown;
     mime?: unknown;
+    /** Typed answer (keyboard on the phone or the Board): same path as speech, without speech-to-text. */
+    text?: unknown;
   };
-  if (typeof session_id !== 'string' || typeof audio_b64 !== 'string') {
-    return json({ error: 'session_id and audio_b64 are required' }, 400);
+  const typed = typeof typedRaw === 'string' ? typedRaw.trim().slice(0, 500) : '';
+  if (typeof session_id !== 'string' || (typeof audio_b64 !== 'string' && !typed)) {
+    return json({ error: 'session_id and audio_b64 (or text) are required' }, 400);
   }
   const log = makeLog('child-talk');
-  const audio = decodeBase64(audio_b64.includes(',') ? audio_b64.slice(audio_b64.indexOf(',') + 1) : audio_b64);
-  if (audio.byteLength < 1500) return json({ mode: 'empty', note: `audio trop court (${audio.byteLength} octets reçus)` });
+  const audio = typed ? new Uint8Array(0) : decodeBase64((audio_b64 as string).includes(',') ? (audio_b64 as string).slice((audio_b64 as string).indexOf(',') + 1) : (audio_b64 as string));
+  if (!typed && audio.byteLength < 1500) return json({ mode: 'empty', note: `audio trop court (${audio.byteLength} octets reçus)` });
   if (audio.byteLength > MAX_AUDIO_BYTES) return json({ error: 'Recording too long' }, 413);
 
   const [user, { data: session }] = await Promise.all([
@@ -95,7 +98,7 @@ Deno.serve(async (req) => {
 
   const child = session.children as { tutor_language?: string; grade?: number } | null;
   const grade = gradeLabel(child?.grade);
-  log('start', { session: session.id, audio_bytes: audio.byteLength, mime, grade });
+  log('start', { session: session.id, ...(typed ? { typed } : { audio_bytes: audio.byteLength, mime }), grade });
   const topic = `session:${session.id}`;
   const turn = parseTurn(reqBody.turn);
   const send = turnSender(topic, turn);
@@ -109,7 +112,7 @@ Deno.serve(async (req) => {
     // Speech-to-text and page context in parallel (the page context is cached after the first turn on a photo).
     // No language hint: the child may read French but ask in Darija; a wrong hint can return an empty text.
     const [transcript, page] = await Promise.all([
-      transcribe(audio, typeof mime === 'string' ? mime : 'audio/mp4'),
+      typed ? Promise.resolve(typed) : transcribe(audio, typeof mime === 'string' ? mime : 'audio/mp4'),
       snap
         ? pageContext(snap, grade, inBackground).catch((e) => {
             log('page context failed', (e as Error).message);
@@ -161,7 +164,7 @@ Deno.serve(async (req) => {
       const word = lastFix && Date.now() - Date.parse(lastFix.created_at) < 3 * 60_000 ? String(lastFix.action).slice('reading_fix:'.length) : '';
       if (word && spoken.some((w) => similar(w.norm, normalizeWord(word)))) {
         const text = REPEAT_OK[language];
-        const audioUrl = await speechUrl(text, language);
+        const audioUrl = await speechUrl(text, language, session.household_id);
         await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'praise', text, language, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
         log('decision', { mode: 'repeat', word, ok: true });
         return json({ mode: 'repeat', transcript, text, ms: Date.now() - started });
@@ -169,7 +172,7 @@ Deno.serve(async (req) => {
     }
 
     // A command to Silia ("explique l'exercice 2") is never treated as reading, even if its words are on the page.
-    const command = looksLikeCommand(transcript);
+    const command = !!typed || looksLikeCommand(transcript);
     // The printed text is read only the first time she talks about this page (not on every photo).
     if (!command && page && !page.text && snap) {
       page.text = await pageText(snap, inBackground).catch(() => '');
@@ -191,11 +194,24 @@ Deno.serve(async (req) => {
         pending,
         log,
       };
-      const quick = quickIntent(transcript);
+      // A bare number while an exercise is active ("8", "٨"): her answer, not "exercise 8".
+      const bareNumber = /^\s*[\d\u0660-\u0669]+([.,][\d\u0660-\u0669]+)?\s*$/.test(transcript) && !!focus;
+      const quick = bareNumber ? ({ act: 'question', ex: null } as const) : quickIntent(transcript);
       const intent = quick ?? (await classify(c, transcript, language));
       t.intent_ms = Date.now() - started - t.stt_and_page_ms;
       log('intent', { ...intent, by: quick ? 'rules' : 'model' });
       const outcome = await execute(c, decide(intent, page, focus, pending), 'voice', { transcript, lang: language });
+      logTurn({
+        fn: 'child-talk',
+        session_id: session.id,
+        household_id: session.household_id,
+        turn_id: turn?.id ?? null,
+        priority: 'child',
+        ms: Date.now() - started,
+        timings: t,
+        outcome: `${intent.act}:${outcome.done}`,
+        extra: { intent_by: quick ? 'rules' : 'model' },
+      });
       return json({ mode: 'talk', transcript, intent, ...outcome, ms: Date.now() - started, timings: t });
     }
 
@@ -234,7 +250,7 @@ Deno.serve(async (req) => {
       reading: { accuracy: reading.accuracy, misread: reading.substituted, skipped: reading.skipped },
     });
     const phrase = familiar ? await phrasePath(text, language) : null;
-    const audioUrl = familiar ? null : await speechUrl(text, language);
+    const audioUrl = familiar ? null : await speechUrl(text, language, session.household_id);
     const messageId = crypto.randomUUID();
     await send('tutor.say', {
       message_id: messageId,
@@ -254,6 +270,17 @@ Deno.serve(async (req) => {
       })(),
     );
 
+    logTurn({
+      fn: 'child-talk',
+      session_id: session.id,
+      household_id: session.household_id,
+      turn_id: turn?.id ?? null,
+      priority: 'child',
+      ms: Date.now() - started,
+      timings: t,
+      outcome: `reading:${kind}`,
+      extra: { accuracy: reading.accuracy, words: reading.matched },
+    });
     return json({
       mode,
       transcript,

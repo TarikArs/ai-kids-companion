@@ -31,8 +31,21 @@ export async function phrasePath(text: string, lang: Lang): Promise<string | nul
   return `${lang}/${await sha256(`${voice}|${MODEL}|${text}`)}.mp3`;
 }
 
-/** Signed URL (1 h) of the spoken text, or null when TTS is not configured or fails (the Board then uses the device voice). */
-export async function speechUrl(text: string, lang: Lang): Promise<string | null> {
+/** Parent setting (households.voice_enabled). Off = no ElevenLabs request at all. Unknown (migration missing) = on. */
+export async function voiceEnabled(householdId: string): Promise<boolean> {
+  const { data, error } = await admin.from('households').select('voice_enabled').eq('id', householdId).maybeSingle();
+  return error || !data ? true : data.voice_enabled !== false;
+}
+
+/**
+ * Signed URL (1 h) of the spoken text, or null when the parent turned the voice off, TTS is not configured, or it fails.
+ * Voice off: returns before any ElevenLabs or Storage request (zero credits); the Board shows the text only.
+ */
+export async function speechUrl(text: string, lang: Lang, householdId: string): Promise<string | null> {
+  if (!(await voiceEnabled(householdId))) {
+    lastTtsError = 'voice off (parent setting): text only';
+    return null;
+  }
   const voice = VOICES[lang] ?? VOICES.fr;
   const path = await phrasePath(text, lang);
   if (!KEY) {

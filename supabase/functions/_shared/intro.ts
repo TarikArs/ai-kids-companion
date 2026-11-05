@@ -101,6 +101,8 @@ export async function introFor(e: PageExerciseLite, items: ItemLite[], lang: Lan
 Title: "${e.title}". Printed instruction: "${e.instr}". First items: ${mine.slice(0, 3).map((i) => `"${i.key}"`).join(', ') || '(none read)'}.
 In ${SPEAKING_STYLE[lang]}, say in 1 or 2 short sentences what she has to do (start like "Exercise ${name}:" in that language),
 then invite her to start with the first item, naming it. Max 28 words, warm, read aloud, no emojis. Never give an answer.
+If the instruction is missing or unclear, infer the most likely task from the title and the items (a model letter followed
+by dots = copy that letter along the line). Never say you cannot see the instruction.
 Reply with the sentences only.`,
           },
         ],

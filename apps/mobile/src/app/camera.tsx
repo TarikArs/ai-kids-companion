@@ -16,7 +16,7 @@ import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -38,7 +38,7 @@ import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
 import { log, logError } from '@/lib/log';
-import { ACTION_LABEL, exerciseName, loadFocus, requestHelp } from '@/lib/exercise';
+import { ACTION_LABEL, exerciseName, loadFocus, requestHelp, sendTyped } from '@/lib/exercise';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { useUnpair } from '@/lib/use-unpair';
 import { CHANGED, MOVING, changedPixels, grabFrame, type Frame } from '@/lib/page-watch';
@@ -47,10 +47,16 @@ import { CHANGED, MOVING, changedPixels, grabFrame, type Frame } from '@/lib/pag
 const WATCH_MS = 3000;
 const SAFETY_MS = 120_000;
 
-// 2048 px: pencil digits stay readable when the server zooms on an answer.
-const MAX_SIDE = 2048;
-// A 2048 px JPEG of a real page is usually 250-700 KB. Black, empty or very blurry photos compress far smaller.
-const MIN_PHOTO_BYTES = 70_000;
+// 1536 px, cropped to the page: pencil digits stay readable, and the AI reads a smaller image faster.
+const MAX_SIDE = 1536;
+// A 1536 px JPEG of a real page is usually 150-450 KB. Black, empty or very blurry photos compress far smaller.
+const MIN_PHOTO_BYTES = 40_000;
+/** Margin kept around the page when cropping (fraction of the image). */
+const CROP_MARGIN = 0.05;
+/** Frame change this large (pixels of the 160 px watch frame): the page or the phone moved, crop is forgotten. */
+const MOVED = 2000;
+
+type Box = { x: number; y: number; w: number; h: number };
 // Long enough to read a whole passage aloud.
 const MAX_TALK_MS = 90_000;
 
@@ -121,6 +127,8 @@ export default function Camera() {
   /** What the page watcher is doing, shown in the top chip. */
   const [watch, setWatch] = useState<'watching' | 'waiting' | 'moving'>('watching');
   const watchRef = useRef<{ ref: Frame | null; prev: Frame | null; lastSent: number }>({ ref: null, prev: null, lastSent: 0 });
+  /** Where the page is in the camera image (from the last reading): next photos are cropped to it. null = full image. */
+  const pageBoxRef = useRef<Box | null>(null);
   /** The Board's state: no automatic photo while Silia looks, talks or listens. */
   const boardRef = useRef<{ state: 'watching' | 'busy'; at: number }>({ state: 'watching', at: 0 });
   const [busy, setBusy] = useState(false);
@@ -130,6 +138,10 @@ export default function Camera() {
   const [showDetails, setShowDetails] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [choices, setChoices] = useState<ExerciseChoice[]>([]);
+  /** Typed answer ("8"): the field is open, and what she typed. */
+  const [typing, setTyping] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [sending, setSending] = useState(false);
   /** Active exercise (synced with the Board: voice, taps on either screen). */
   const [focus, setFocus] = useState<ExerciseFocus | null>(null);
 
@@ -204,9 +216,25 @@ export default function Camera() {
     const secs = (ms: number) => (ms / 1000).toFixed(1);
     try {
       const photo = await withTimeout(cameraRef.current.takePictureAsync({ quality: 0.8, shutterSound: false }), 10_000, 'Photo');
-      const context = ImageManipulator.manipulate(photo.uri);
-      if (Math.max(photo.width, photo.height) > MAX_SIDE) {
-        context.resize(photo.width >= photo.height ? { width: MAX_SIDE, height: null } : { width: null, height: MAX_SIDE });
+      // Real (upright) size first, then crop to the page known from the last reading, then resize.
+      const base = await ImageManipulator.manipulate(photo.uri).renderAsync();
+      const context = ImageManipulator.manipulate(base);
+      const page = pageBoxRef.current;
+      let sent: Box = { x: 0, y: 0, w: 1, h: 1 };
+      let outW = base.width;
+      let outH = base.height;
+      if (page) {
+        const x0 = Math.max(0, page.x - CROP_MARGIN);
+        const y0 = Math.max(0, page.y - CROP_MARGIN);
+        const x1 = Math.min(1, page.x + page.w + CROP_MARGIN);
+        const y1 = Math.min(1, page.y + page.h + CROP_MARGIN);
+        sent = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        outW = Math.round(sent.w * base.width);
+        outH = Math.round(sent.h * base.height);
+        context.crop({ originX: Math.round(x0 * base.width), originY: Math.round(y0 * base.height), width: outW, height: outH });
+      }
+      if (Math.max(outW, outH) > MAX_SIDE) {
+        context.resize(outW >= outH ? { width: MAX_SIDE, height: null } : { width: null, height: MAX_SIDE });
       }
       const rendered = await context.renderAsync();
       const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
@@ -248,6 +276,17 @@ export default function Camera() {
       if (fnErr) throw new Error(await functionError(fnErr));
       const tDone = Date.now();
       log('camera', `photo: analysis done in ${tDone - t0} ms`, data);
+      // Remember where the page is (in full-image fractions) to crop the next photos. Forget it when the page
+      // was not seen well, or when it touches the edge of a cropped photo (it may go beyond: next photo full size).
+      const b = data?.page_box as Box | null | undefined;
+      const cropped = sent.w < 1 || sent.h < 1;
+      const atEdge = b ? b.x < 0.01 || b.y < 0.01 || b.x + b.w > 0.99 || b.y + b.h > 0.99 : true;
+      if (!b || data?.reason || data?.quiet_reason === 'unsure' || (cropped && atEdge)) {
+        if (pageBoxRef.current) log('camera', 'crop: forgotten (next photo full size)');
+        pageBoxRef.current = null;
+      } else if (b.w * b.h > 0.15) {
+        pageBoxRef.current = { x: sent.x + b.x * sent.w, y: sent.y + b.y * sent.h, w: b.w * sent.w, h: b.h * sent.h };
+      }
       if (data?.reason === 'no_page') setStatus('Je ne vois pas le cahier. Vise la page.');
       else if (data?.reason === 'hand_blocking') setStatus('Une main cache le cahier.');
       else if (data?.action === 'silent') {
@@ -324,6 +363,8 @@ export default function Camera() {
         setWatch('watching');
         const changed = changedPixels(frame, w.ref);
         const safety = Date.now() - w.lastSent > SAFETY_MS;
+        // The page or the phone moved a lot (page turned, notebook pushed): crop again from a full photo.
+        if (changed > MOVED || safety) pageBoxRef.current = null;
         if (!w.ref || changed > CHANGED || safety) {
           log('camera', `page ${!w.ref ? 'first look' : safety ? 'safety photo' : `changed (${changed} px)`}`);
           w.ref = frame;
@@ -419,8 +460,26 @@ export default function Camera() {
     if (talk === 'recording' && recState.durationMillis >= MAX_TALK_MS) stopTalk();
   }, [talk, recState.durationMillis, stopTalk]);
 
+  // ---------- typed answer ----------
+  async function sendAnswer() {
+    const text = typed.trim();
+    if (!session || !text) return;
+    setSending(true);
+    talkRef.current = true; // no photo while Silia answers
+    const { data, error } = await sendTyped(session.id, text);
+    talkRef.current = false;
+    setSending(false);
+    if (error) {
+      setDetails(`Erreur réponse écrite : ${error}`);
+      return;
+    }
+    log('camera', 'typed: result', data);
+    setTyped('');
+    setTyping(false);
+  }
+
   // ---------- explain ----------
-  async function explainExercise(choice?: ExerciseChoice, action?: 'choose') {
+  async function explainExercise(choice?: ExerciseChoice, action?: 'choose' | 'similar') {
     if (!session) return;
     setExplaining(true);
     setChoices([]);
@@ -507,7 +566,7 @@ export default function Camera() {
             {talk === 'recording' ? <Text style={styles.chipText}>{recordingSecs}s</Text> : null}
           </View>
           <View style={styles.topActions}>
-            {details ? <IconButton icon="info" label="Détails" size={44} onPress={() => setShowDetails((v) => !v)} /> : null}
+            {status || details ? <IconButton icon="info" label="Détails" size={44} onPress={() => setShowDetails((v) => !v)} /> : null}
             {session ? (
               <>
                 <IconButton
@@ -529,12 +588,8 @@ export default function Camera() {
 
         {/* bottom: what the tutor says, exercise choices, the 3 main buttons */}
         <View style={styles.bottom}>
-          {showDetails && details ? <Text style={styles.details}>{details}</Text> : null}
-          {status ? (
-            <Text style={styles.status} numberOfLines={3}>
-              {status}
-            </Text>
-          ) : null}
+          {showDetails && (status || details) ? <Text style={styles.details}>{[status, details].filter(Boolean).join('\n')}</Text> : null}
+          {/* No text on the Camera: Silia's messages are on the Board (status kept in Détails for debugging). */}
           {focus && !choices.length ? (
             <Pressable
               accessibilityRole="button"
@@ -549,6 +604,44 @@ export default function Camera() {
                 {focus.action ? ` · ${ACTION_LABEL[focus.action]}` : ''}
               </Text>
               <Text style={styles.focusChange}>Changer</Text>
+            </Pressable>
+          ) : null}
+          {session && typing ? (
+            <View style={styles.typeRow}>
+              <TextInput
+                value={typed}
+                onChangeText={setTyped}
+                placeholder="Ta réponse…"
+                placeholderTextColor="#B9C1E0"
+                autoFocus
+                returnKeyType="send"
+                onSubmitEditing={sendAnswer}
+                style={styles.typeInput}
+                maxLength={200}
+              />
+              <IconButton icon="send" label="Envoyer ma réponse" size={48} tone="accent" onPress={sendAnswer} loading={sending} disabled={!typed.trim()} />
+              <IconButton icon="stop" label="Fermer" size={40} onPress={() => setTyping(false)} />
+            </View>
+          ) : null}
+          {session && !typing && talk === 'idle' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Écrire ma réponse au clavier"
+              onPress={() => setTyping(true)}
+              style={({ pressed }) => [styles.similarChip, pressed && { opacity: 0.8 }]}
+            >
+              <Text style={styles.focusTitle}>Écrire ma réponse</Text>
+            </Pressable>
+          ) : null}
+          {focus && !choices.length ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Un exercice pareil pour m’entraîner"
+              onPress={() => explainExercise(undefined, 'similar')}
+              disabled={talk !== 'idle' || explaining}
+              style={({ pressed }) => [styles.similarChip, pressed && { opacity: 0.8 }]}
+            >
+              <Text style={styles.focusTitle}>Exercice similaire</Text>
             </Pressable>
           ) : null}
           {choices.length ? (
@@ -713,5 +806,24 @@ const styles = StyleSheet.create({
   },
   focusTitle: { color: colors.text, fontSize: 15, fontWeight: '800', flexShrink: 1 },
   focusChange: { color: '#7FD3FF', fontSize: 13, fontWeight: '900' },
+  typeRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  typeInput: {
+    flex: 1,
+    height: 48,
+    backgroundColor: 'rgba(27,35,64,0.95)',
+    color: colors.text,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  similarChip: {
+    alignSelf: 'center',
+    height: 40,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(27,35,64,0.92)',
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+  },
   mainRow: { flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'flex-end', paddingBottom: space.sm },
 });

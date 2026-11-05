@@ -2,7 +2,7 @@ import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 // Simple stroke icons (24x24) drawn with react-native-svg: no extra package.
 
-export type IconName = 'camera' | 'mic' | 'stop' | 'bulb' | 'pause' | 'play' | 'flag' | 'unlink' | 'info' | 'check' | 'home' | 'refresh';
+export type IconName = 'camera' | 'mic' | 'stop' | 'bulb' | 'pause' | 'play' | 'flag' | 'unlink' | 'info' | 'check' | 'home' | 'refresh' | 'keyboard' | 'send';
 
 export function Icon({ name, size = 28, color = '#FFFFFF' }: { name: IconName; size?: number; color?: string }) {
   const p = { stroke: color, strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
@@ -49,6 +49,22 @@ export function Icon({ name, size = 28, color = '#FFFFFF' }: { name: IconName; s
           <Path d="M15 7h2a5 5 0 0 1 4 8" {...p} />
           <Line x1={8} y1={12} x2={11} y2={12} {...p} />
           <Line x1={2} y1={2} x2={22} y2={22} {...p} />
+        </>
+      ) : null}
+      {name === 'keyboard' ? (
+        <>
+          <Rect x={2} y={6} width={20} height={12} rx={2} {...p} />
+          <Line x1={6} y1={10} x2={6.01} y2={10} {...p} />
+          <Line x1={10} y1={10} x2={10.01} y2={10} {...p} />
+          <Line x1={14} y1={10} x2={14.01} y2={10} {...p} />
+          <Line x1={18} y1={10} x2={18.01} y2={10} {...p} />
+          <Line x1={8} y1={14} x2={16} y2={14} {...p} />
+        </>
+      ) : null}
+      {name === 'send' ? (
+        <>
+          <Path d="M22 2L11 13" {...p} />
+          <Path d="M22 2l-7 20-4-9-9-4z" {...p} />
         </>
       ) : null}
       {name === 'home' ? (

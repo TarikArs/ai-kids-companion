@@ -125,7 +125,7 @@ suggestion for tomorrow. Plain, factual, kind. No emojis.`,
       wrong: wrongNow,
       at: new Date().toISOString(),
     };
-    const audioUrl = await speechUrl(childText, language);
+    const audioUrl = await speechUrl(childText, language, session.household_id);
     const messageId = crypto.randomUUID();
     await send('tutor.say', { message_id: messageId, kind: 'praise', text: childText, language, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
     inBackground(

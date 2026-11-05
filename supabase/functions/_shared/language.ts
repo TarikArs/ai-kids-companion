@@ -146,7 +146,7 @@ export const CHECK_TEXT: Record<Lang, { allGood: string; cannotCheck: string; no
   },
 };
 
-type Act = 'explain' | 'solve' | 'correct';
+type Act = 'explain' | 'solve' | 'correct' | 'similar';
 const list = (lang: Lang, ns: string[]) => {
   if (ns.length <= 1) return ns.join('');
   const and = { fr: ' et ', ar: ' و', fus: ' و', en: ' and ' }[lang];
@@ -170,7 +170,7 @@ export const FOCUS_TEXT: Record<
     unreadable: 'Je ne vois pas bien la page : elle est trop sombre, floue ou coupée. Reprends une photo bien droite, avec de la lumière.',
     noExercise: 'Je ne trouve pas d’exercice sur cette photo. Montre-moi la page de plus près.',
     askWhich: (a) =>
-      `Quel exercice ${a === 'solve' ? 'veux-tu qu’on résolve ensemble' : a === 'correct' ? 'veux-tu que je corrige' : 'veux-tu que je t’explique'} ? Dis son numéro ou touche-le.`,
+      `Quel exercice ${a === 'solve' ? 'veux-tu qu’on résolve ensemble' : a === 'correct' ? 'veux-tu que je corrige' : a === 'similar' ? 'veux-tu refaire avec un exercice pareil' : 'veux-tu que je t’explique'} ? Dis son numéro ou touche-le.`,
     notFound: (m, av) => `Je ne vois pas l’exercice ${m} sur la photo. Je vois ${av.length > 1 ? 'les exercices' : 'l’exercice'} ${list('fr', av)}. Lequel veux-tu ?`,
     askAction: (n, t) => `D’accord, l’exercice ${n} : ${t}. Je te l’explique, on le résout ensemble, ou je le corrige ?`,
   },
@@ -179,7 +179,7 @@ export const FOCUS_TEXT: Record<
     unreadable: 'ما كنشوفش الصفحة مزيان: ظلمة ولا مضبّبة ولا مقطوعة. صوّري مرة أخرى مقابلة ومع الضو.',
     noExercise: 'ما لقيتش تمرين فهاد التصويرة. قرّبي ليا الصفحة.',
     askWhich: (a) =>
-      `شمن تمرين ${a === 'solve' ? 'بغيتي نحلّوه مع بعض' : a === 'correct' ? 'بغيتي نصحّح ليك' : 'بغيتي نشرح ليك'}؟ قولي الرقم ديالو ولا ورّكي عليه.`,
+      `شمن تمرين ${a === 'solve' ? 'بغيتي نحلّوه مع بعض' : a === 'correct' ? 'بغيتي نصحّح ليك' : a === 'similar' ? 'بغيتي نعطيك بحالو' : 'بغيتي نشرح ليك'}؟ قولي الرقم ديالو ولا ورّكي عليه.`,
     notFound: (m, av) => `ما كنشوفش التمرين ${m} فالتصويرة. كنشوف ${list('ar', av)}. شمن واحد بغيتي؟`,
     askAction: (n, t) => `واخا، التمرين ${n}: ${t}. نشرحو ليك، نحلّوه مع بعض، ولا نصحّحو ليك؟`,
   },
@@ -188,7 +188,7 @@ export const FOCUS_TEXT: Record<
     unreadable: 'لا أرى الصفحة جيدًا: إنها مظلمة أو غير واضحة أو مقطوعة. التقطي صورة أخرى مستقيمة وفي الضوء.',
     noExercise: 'لا أجد تمرينًا في هذه الصورة. قرّبي الصفحة قليلًا.',
     askWhich: (a) =>
-      `أيّ تمرين ${a === 'solve' ? 'تريدين أن نحلّه معًا' : a === 'correct' ? 'تريدين أن أصحّحه' : 'تريدين أن أشرحه لكِ'}؟ قولي رقمه أو المسيه.`,
+      `أيّ تمرين ${a === 'solve' ? 'تريدين أن نحلّه معًا' : a === 'correct' ? 'تريدين أن أصحّحه' : a === 'similar' ? 'تريدين تمرينًا مشابهًا له' : 'تريدين أن أشرحه لكِ'}؟ قولي رقمه أو المسيه.`,
     notFound: (m, av) => `لا أرى التمرين ${m} في الصورة. أرى ${av.length > 1 ? 'التمارين' : 'التمرين'} ${list('fus', av)}. أيّها تريدين؟`,
     askAction: (n, t) => `حسنًا، التمرين ${n}: ${t}. هل أشرحه لكِ، أم نحلّه معًا، أم أصحّحه؟`,
   },
@@ -197,7 +197,7 @@ export const FOCUS_TEXT: Record<
     unreadable: 'I can’t see the page well: it is too dark, blurry or cut off. Take another photo, straight and in the light.',
     noExercise: 'I can’t find an exercise on this photo. Show me the page closer.',
     askWhich: (a) =>
-      `Which exercise ${a === 'solve' ? 'shall we solve together' : a === 'correct' ? 'should I correct' : 'should I explain'}? Say its number or tap it.`,
+      `Which exercise ${a === 'solve' ? 'shall we solve together' : a === 'correct' ? 'should I correct' : a === 'similar' ? 'do you want a similar one for' : 'should I explain'}? Say its number or tap it.`,
     notFound: (m, av) => `I can’t see exercise ${m} on the photo. I can see exercise${av.length > 1 ? 's' : ''} ${list('en', av)}. Which one?`,
     askAction: (n, t) => `OK, exercise ${n}: ${t}. Shall I explain it, solve it with you, or correct it?`,
   },

@@ -64,6 +64,12 @@ ok: false when no page can be read (too dark, blurry, cut off, no homework page)
 text: the PRINTED text of the page exactly, in reading order (Arabic stays in Arabic script), no handwriting, max 2000 characters.
 ex: the separate exercises in reading order. n: position 1, 2, 3… lb: the exercise number printed on the page ("" if none).
 title: short title in the page's language (the printed title, or 3-6 words). instr: the printed instruction (consigne) exactly.
+Many exercises have NO printed instruction: infer the task from the layout and write it in the page's language, never
+"no instruction". A model letter, digit or word at the start of a line followed by dots, slots or empty space = handwriting
+practice (t=copy): "Écris la lettre A dans chaque case" (slots may ask for several forms: capital, small, cursive).
+One item per line: k = "Recopier A", m = the model ("A"), a = EVERYTHING she wrote on that line after the model,
+separated by spaces, exactly as written even if it is another letter (e.g. "A a e"); a = null only if all slots are empty.
+Dots or lines are empty slots, not answers. Words or numbers with gaps = fill in.
 s: empty|partial|done from the child's answers. r: the exercise's box as fractions (0-1) of THIS image's width and height.
 it: every place where the child must answer, in order. q: the item as printed, with ? for the blank (word problem: its question).
 a: the child's handwriting copied exactly, even if wrong (a whole calculation if she wrote one); null if nothing is written or it cannot be seen.

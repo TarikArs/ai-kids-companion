@@ -85,6 +85,29 @@ export function ParentHome({
     router.replace('/camera');
   }
 
+  /** Silia's voice. Off = text only on the Board, and NO request to ElevenLabs (no credits). null = not loaded. */
+  const [voiceOn, setVoiceOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    supabase
+      .from('households')
+      .select('voice_enabled')
+      .eq('id', household.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) setVoiceOn((data as { voice_enabled?: boolean }).voice_enabled !== false);
+      });
+  }, [household.id]);
+
+  async function setVoice(on: boolean) {
+    const before = voiceOn;
+    setVoiceOn(on);
+    const { error: e } = await supabase.from('households').update({ voice_enabled: on }).eq('id', household.id);
+    if (e) {
+      setVoiceOn(before);
+      setError(e.message);
+    }
+  }
+
   /** Report of the latest finished session (written by Silia at "Terminer"). */
   const [report, setReport] = useState<{ started_at: string; summary: SessionSummary } | null>(null);
   useEffect(() => {
@@ -280,6 +303,28 @@ export function ParentHome({
           </View>
         );
       })}
+
+      {/* Silia's voice */}
+      {voiceOn !== null ? (
+        <View style={{ gap: space.sm }}>
+          <Text style={styles.heading}>Voix de {TUTOR_NAME}</Text>
+          <View style={styles.section}>
+            <Pills
+              options={[
+                { value: 'on', label: 'Activée' },
+                { value: 'off', label: 'Coupée' },
+              ]}
+              value={voiceOn ? 'on' : 'off'}
+              onChange={(v) => setVoice(v === 'on')}
+            />
+            <Text style={styles.sub}>
+              {voiceOn
+                ? `${TUTOR_NAME} parle sur le Tableau. Chaque nouvelle phrase utilise des crédits ElevenLabs ; les phrases déjà dites sont gratuites.`
+                : `${TUTOR_NAME} écrit seulement sur le Tableau. Aucune requête ElevenLabs, aucun crédit utilisé.`}
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* advanced */}
       <Pressable accessibilityRole="button" onPress={() => setAdvanced((v) => !v)} style={styles.advancedToggle}>

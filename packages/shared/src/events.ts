@@ -36,7 +36,7 @@ export interface ExerciseChoice {
 }
 
 /** What the child wants for an exercise. */
-export type HelpAction = 'explain' | 'solve' | 'correct';
+export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar';
 
 /** The active exercise: stays the focus of follow-up requests until the child switches (voice or tap). */
 export interface ExerciseFocus {
@@ -48,6 +48,8 @@ export interface ExerciseFocus {
   snapshot_id?: string;
   /** Last help given on it (follow-ups continue in this mode). */
   action?: HelpAction;
+  /** Practice exercise generated for it (shown on the Board; the answers stay on the server side for checking). */
+  practice?: { title: string; instr?: string; kind?: 'copy' | 'fill' | 'other'; items: { q: string; a?: string; m?: string; slots?: number }[] };
   at: string;
 }
 
@@ -155,9 +157,22 @@ export interface SessionEvents {
   'plan.changed': { plan: SessionPlan };
   /** A subject is finished: a short break before the next one (the Camera waits, the Board counts down). */
   'session.break': { seconds: number; next?: string; language: string };
+  /** A similar exercise to practise, shown on the Board (questions only). */
+  'practice.show': {
+    exercise_index: number;
+    title: string;
+    /** Printed instruction, drawn at the top of the chalkboard. */
+    instr?: string;
+    /** copy = model + dotted slots (like the notebook); fill = item with a dotted blank; other = text. */
+    kind?: 'copy' | 'fill' | 'other';
+    items: { q: string; m?: string; slots?: number }[];
+    language: string;
+    turn?: TurnRef;
+  };
   /** Active exercise changed (voice, tap or the only exercise on the page). null = no focus. */
   'focus.changed': { focus: ExerciseFocus | null; by: 'voice' | 'tap' | 'auto' };
-  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean; turn?: TurnRef };
+  /** keep_mood: marks shown ahead of Silia's sentence (the turn is not over). */
+  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean; keep_mood?: boolean; turn?: TurnRef };
   'tutor.speaking.end': { message_id: string };
   'child.talk.start': Record<string, never>;
   'child.talk.end': Record<string, never>;

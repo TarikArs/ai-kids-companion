@@ -11,12 +11,24 @@
 // the tutor treats it as "not sure" and stays silent; that is what gets scored.
 
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const CONFIDENCE_THRESHOLD = 0.75; // below this the tutor stays silent
 const RUNS = Math.max(1, Number(process.env.RUNS || 2));
+// Speed benchmark: MAX_SIDE=1536 sends each photo resized (longest side, macOS `sips`), like the app would.
+const MAX_SIDE = Number(process.env.MAX_SIDE || 0);
+
+async function loadPhoto(file) {
+  const src = path.join(DIR, 'photos', file);
+  if (!MAX_SIDE) return (await readFile(src)).toString('base64');
+  const out = path.join(tmpdir(), `m0-${MAX_SIDE}-${file}`);
+  execFileSync('sips', ['-Z', String(MAX_SIDE), src, '--out', out], { stdio: 'ignore' });
+  return (await readFile(out)).toString('base64');
+}
 
 // ---------- providers ----------
 // Model names change often: set the newest ones in .env.
@@ -233,11 +245,11 @@ async function runLive(only) {
 
   const report = [];
   for (const [name, provider] of active) {
-    console.log(`== ${name} (${provider.model}${provider.effort ? `, effort ${provider.effort}` : ''}) x${RUNS} runs`);
+    console.log(`== ${name} (${provider.model}${provider.effort ? `, effort ${provider.effort}` : ''}${MAX_SIDE ? `, ${MAX_SIDE}px` : ''}) x${RUNS} runs`);
     const rows = [];
     const raw = { provider: name, model: provider.model, effort: provider.effort || null, runs: RUNS, photos: [] };
     for (const photo of labels.photos) {
-      const b64 = (await readFile(path.join(DIR, 'photos', photo.file))).toString('base64');
+      const b64 = await loadPhoto(photo.file);
       const outputs = [];
       const times = [];
       const errors = [];
@@ -262,7 +274,7 @@ async function runLive(only) {
       console.log(`  ${photo.file}: ${okN}/${core.length} correct, ${times.join('/')} ms${errors.length ? ` ERROR ${errors[0]}` : ''}`);
     }
     await writeFile(path.join(outDir, `raw-${name}.json`), JSON.stringify(raw, null, 2));
-    report.push(summarize(name, provider.model + (provider.effort ? ` (${provider.effort})` : ''), rows));
+    report.push(summarize(name, provider.model + (provider.effort ? ` (${provider.effort})` : '') + (MAX_SIDE ? ` · ${MAX_SIDE}px` : ''), rows));
   }
   await finish(report, unverified, outDir);
 }

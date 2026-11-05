@@ -6,8 +6,8 @@
 import { westernDigits } from './arithmetic.ts';
 import type { PageContext, PageExercise } from './page.ts';
 
-export type HelpAction = 'explain' | 'solve' | 'correct';
-export const HELP_ACTIONS: HelpAction[] = ['explain', 'solve', 'correct'];
+export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar';
+export const HELP_ACTIONS: HelpAction[] = ['explain', 'solve', 'correct', 'similar'];
 
 export interface Intent {
   /** select = an exercise named without saying what to do; choose = "another exercise" / "which ones are there". */
@@ -25,6 +25,18 @@ export interface FocusState {
   title: string;
   label?: string;
   action?: HelpAction;
+  /** Practice exercise Silia generated for this exercise (answers are secret, used to check hers). */
+  practice?: Practice;
+}
+
+export interface Practice {
+  title: string;
+  /** The instruction, as it would be printed ("Écris la lettre D dans chaque case."). */
+  instr?: string;
+  /** How the Board draws it: copy = model + dotted slots; fill = items with a dotted blank; other = text. */
+  kind?: 'copy' | 'fill' | 'other';
+  /** m = model letter/word and slots = empty slots per line (copy only). */
+  items: { q: string; a: string; m?: string; slots?: number }[];
 }
 
 export type Decision =
@@ -55,6 +67,7 @@ const norm = (s: string) =>
 const ACTION_PATTERNS: Record<HelpAction, RegExp> = {
   explain: /\b(expliqu\w*|explain\w*)\b|(^|\s)(ا?شرح\S*|فسر\S*|فهمي?ني|فهميني)(\s|$)|c est quoi|comprends? pas|don t understand/,
   solve: /\b(resou\w*|resoud\w*|resolv\w*|solve\w*|on (le |la )?fai[ts]|faisons|let s do|work on|help me (do|with))\b|(^|\s)(نحل\S*|لنحل\S*|حل|حلي|حليه|حليها|ساعديني)(\s|$)/,
+  similar: /\b(similaire\w*|(exercice|un) pareil\w*|pareil\w* (exercice|a celui)|semblable\w*|un autre (exercice|comme)|encore un|entrain\w*|similar|another one|more practice|practice)\b|(^|\s)(مشابه\S*|بحالو|تمرين (آخر|اخر)|زيديني|زدني)(\s|$)/,
   correct: /\b(corrig\w*|correct\w*|verifi\w*|check\w*|c est (juste|bon)|is it (right|correct))\b|(^|\s)(صحح\S*|يصحح\S*|تحقق\S*|راجع\S*)(\s|$)/,
 };
 
@@ -97,6 +110,9 @@ export function exerciseRef(text: string): number | null {
     for (const [re, n] of ORDINALS) if (re.test(w)) return n;
   }
   for (const [re, n] of ORDINALS) if (re.test(t)) return n;
+  // "un exercice similaire au 2", "pareil à celui du 3"
+  const toNumber = EXERCISE_WORD.test(t) ? t.match(/\b(?:au|du|a|le)\s+(\d{1,2})\b/) : null;
+  if (toNumber) return Number(toNumber[1]);
   return null;
 }
 

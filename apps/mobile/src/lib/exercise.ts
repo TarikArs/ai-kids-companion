@@ -15,7 +15,12 @@ export async function loadFocus(sessionId: string): Promise<ExerciseFocus | null
 /** "Exercice 10 · Je lis et je réponds" (printed number when there is one). */
 export const exerciseName = (e: { index: number; label?: string }) => e.label ?? String(e.index);
 
-export const ACTION_LABEL: Record<HelpAction, string> = { explain: 'Expliquer', solve: 'Résoudre', correct: 'Corriger' };
+export const ACTION_LABEL: Record<HelpAction, string> = {
+  explain: 'Expliquer',
+  solve: 'Résoudre',
+  correct: 'Corriger',
+  similar: 'Exercice similaire',
+};
 
 /**
  * Exercise help through explain-exercise (same server logic as voice requests):
@@ -35,6 +40,19 @@ export async function requestHelp(
       ...(opts.action ? { action: opts.action } : {}),
       turn: opts.turn ?? newTurn('child'),
     },
+  });
+  return { data, error: error ? await functionError(error) : null };
+}
+
+/** Typed answer ("8", "le chat", a question): same path as speech in child-talk, without speech-to-text. */
+export async function sendTyped(
+  sessionId: string,
+  text: string,
+  turn?: { id: string; priority: 'child' | 'auto' },
+): Promise<{ data: any; error: string | null }> {
+  log('exercise', `typed: ${text}`);
+  const { data, error } = await supabase.functions.invoke('child-talk', {
+    body: { session_id: sessionId, text, turn: turn ?? newTurn('child') },
   });
   return { data, error: error ? await functionError(error) : null };
 }

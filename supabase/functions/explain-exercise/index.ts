@@ -11,7 +11,7 @@
 
 import { corsHeaders, json } from '../_shared/cors.ts';
 import { gradeLabel } from '../_shared/language.ts';
-import { makeLog } from '../_shared/log.ts';
+import { logTurn, makeLog } from '../_shared/log.ts';
 import { decide, HELP_ACTIONS, type HelpAction, type Intent } from '../_shared/intent.ts';
 import { execute, loadFocus, type HelpCtx } from '../_shared/help.ts';
 import { latestSnapshot, pageContext } from '../_shared/page.ts';
@@ -82,6 +82,16 @@ Deno.serve(async (req) => {
     });
 
     const outcome = await execute(c, decide(intent, page, focus, pending), 'tap');
+    logTurn({
+      fn: 'explain-exercise',
+      session_id: session.id,
+      household_id: session.household_id,
+      turn_id: turn?.id ?? null,
+      priority: 'child',
+      ms: Date.now() - started,
+      outcome: `${intent.act}:${outcome.done}`,
+      extra: { page: snap?.exercises ? 'cached' : 'read now' },
+    });
     return json({ ...outcome, ms: Date.now() - started });
   } catch (e) {
     console.error(e);

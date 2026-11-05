@@ -11,13 +11,14 @@
 import { encodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 import { evalExpression, expectedAnswer, formatAnswer, ownCalculationSlip, sameAnswer } from '../_shared/arithmetic.ts';
+import { checkCopy, copyModel, verifyCopyLines } from '../_shared/copy.ts';
 import { introFor, pickIntro, regionOf, type PageExerciseLite } from '../_shared/intro.ts';
 import type { PageContext } from '../_shared/page.ts';
 import { activate, BREAK_SECONDS, doneText, finishActive, loadPlan, planFromDiary, planText, savePlan, subjectOf, type Subject } from '../_shared/plan.ts';
 import { broadcast, parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { corsHeaders, json } from '../_shared/cors.ts';
 import { CHECK_TEXT, gradeLabel, PHRASES, SPEAKING_STYLE, tutorLang, type Lang } from '../_shared/language.ts';
-import { makeLog } from '../_shared/log.ts';
+import { logTurn, makeLog } from '../_shared/log.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
 import { lastTtsError, phrasePath, speechUrl } from '../_shared/tts.ts';
 
@@ -27,6 +28,14 @@ const inBackground = (p: Promise<unknown>) => (typeof EdgeRuntime !== 'undefined
 
 const MODEL = Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-6-luna';
 const EFFORT = Deno.env.get('OPENAI_REASONING_EFFORT') ?? 'low';
+// The page reading is mostly copying what is written: its own model and reasoning effort, tuned with
+// experiments/m0-handwriting-test/bench.sh (fastest setting that keeps >= 90 % read and 0 harmful).
+const READ_MODEL = Deno.env.get('OPENAI_READ_MODEL') ?? MODEL;
+const READ_EFFORT = Deno.env.get('OPENAI_READ_EFFORT') ?? EFFORT;
+// Fast reading (e.g. effort "none") misreads a few digits with high confidence. When set, an answer that looks wrong is
+// read again with this deeper effort BEFORE Silia says it: fast for right answers, safe for "wrong". Benchmark:
+// none = ~3 s but 1-2 harmful misreads; low = ~8 s, 0-1. Recommended: OPENAI_READ_EFFORT=none, OPENAI_VERIFY_EFFORT=low.
+const VERIFY_EFFORT = Deno.env.get('OPENAI_VERIFY_EFFORT') ?? '';
 const THRESHOLD = Number(Deno.env.get('TUTOR_CONFIDENCE_THRESHOLD') ?? '0.8');
 const PRAISE_COOLDOWN_S = 45;
 const ENCOURAGE_COOLDOWN_S = 120;
@@ -54,6 +63,10 @@ interface ReadItem {
   solutionConfidence?: number;
   /** Position of its exercise on the page (1, 2, 3…). */
   ex?: number;
+  /** Copy exercise: the model letter or word. */
+  model?: string;
+  /** Hint written in the same call, used when the code confirms the answer is wrong (saves a second call). */
+  modelHint?: string;
   /** Open answers (not arithmetic): the model's own check against the page, its confidence, and why (never shown). */
   okModel?: boolean | null;
   okConf?: number;
@@ -62,6 +75,8 @@ interface ReadItem {
 
 interface Reading {
   rot: 0 | 90 | 180 | 270;
+  /** Box of the page in the photo: the Camera crops the next photos to it (smaller image, faster reading). */
+  page?: Region;
   page_visible: boolean;
   hand_blocking: boolean;
   language?: string;
@@ -75,16 +90,23 @@ interface Reading {
 }
 
 // Compact keys keep the model's output short: output tokens are the main cost in time.
-const promptFor = (grade: string) => `Photo of homework by a child in ${grade}. READ what the child wrote; do not correct.
+const promptFor = (grade: string, hintLang: string) => `Photo of homework by a child in ${grade}. READ what the child wrote; do not correct.
 Return JSON only, compact:
-{"rot":0,"v":true,"h":false,"lang":"fr","sub":"math","dy":false,"e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
+{"rot":0,"v":true,"h":false,"pg":[x,y,w,h],"lang":"fr","sub":"math","dy":false,"e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
 rot: how many degrees the photo must be turned CLOCKWISE so the printed text reads upright (0, 90, 180 or 270).
+pg: box of the whole homework page (all its printed and written parts) as fractions (0-1) of the image.
 v: a homework page is visible. h: a hand or object covers answers.
 sub: the subject of the page: math|french|arabic|english|science|islamic|social|other.
 dy: true when the photo shows a homework diary or a list of tasks to do (cahier de textes), not an exercise page; then add
 tk = [{"s":"math","d":"Maths page 42"}]: s = subject code as above, d = the task as a short label in the diary's language.
 e: the separate exercises in reading order, EVEN EMPTY ONES: n = position 1, 2, 3…; lb = the number printed on the page
 ("" if none); ti = short title in the page's language; in = the printed instruction (max 20 words); r = the exercise's box.
+Many exercises have NO printed instruction: infer the task from the layout and write it in the page's language, never
+"no instruction". A model letter, digit or word at the start of a line followed by dots, slots or empty space = handwriting
+practice (t=copy): "Écris la lettre A dans chaque case" (slots may ask for several forms: capital, small, cursive).
+One item per line: k = "Recopier A", m = the model ("A"), a = EVERYTHING she wrote on that line after the model,
+separated by spaces, exactly as written even if it is another letter (e.g. "A a e"); a = null only if all slots are empty.
+Dots or lines are empty slots, not answers. Words or numbers with gaps = fill in.
 i: every item where the child must write, empty ones too (a = null); e = the n of its exercise. k: the exercise as printed with ? for the blank.
 t: fill_in|number_line|word_problem|matching|copy|counting|other.
 a: COPY the child's handwriting digit by digit, exactly as written, even if it is wrong or unfinished. Never write what the
@@ -99,12 +121,16 @@ For answers that are NOT arithmetic (a word, a sentence, a reading question, mat
 the page: ok = true (right) / false (wrong) / null (cannot tell), okc = your confidence 0-1 in ok, and when ok is false,
 w = a short English note for the teacher saying where on the page the right answer is (never shown to the child).
 Skip ok for arithmetic: it is checked elsewhere.
+hn: ONLY for an item where you think her answer may be wrong: ONE short kind hint (max 16 words) ${hintLang}, that helps her
+find the mistake herself. Never the answer, never say she is wrong.
 The photo may be sideways or upside down: read it in any orientation. r is always in THIS photo's coordinates, as it is.
 If the child wrote a whole calculation (e.g. "120 - 80 + 10 = 300"), a = everything she wrote, including her result.
 Arabic, French and English pages are all possible; Arabic digits are fine.`;
 
 interface CompactItem {
   e?: number;
+  hn?: string;
+  m?: string;
   ok?: boolean | null;
   okc?: number;
   w?: string;
@@ -117,7 +143,7 @@ interface CompactItem {
   xc?: number;
 }
 
-async function readPage(imageB64: string, grade: string): Promise<{ reading: Reading; usage: unknown }> {
+async function readPage(imageB64: string, grade: string, hintLang: string, effort = READ_EFFORT): Promise<{ reading: Reading; usage: unknown }> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -125,14 +151,14 @@ async function readPage(imageB64: string, grade: string): Promise<{ reading: Rea
       Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
     },
     body: JSON.stringify({
-      model: MODEL,
-      reasoning_effort: EFFORT,
+      model: READ_MODEL,
+      reasoning_effort: effort,
       response_format: { type: 'json_object' },
       messages: [
         {
           role: 'user',
           content: [
-            { type: 'text', text: promptFor(grade) },
+            { type: 'text', text: promptFor(grade, hintLang) },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageB64}`, detail: 'high' } },
           ],
         },
@@ -152,6 +178,8 @@ async function readPage(imageB64: string, grade: string): Promise<{ reading: Rea
     solution: typeof it.x === 'string' ? it.x : undefined,
     solutionConfidence: Number(it.xc ?? 0),
     ex: typeof it.e === 'number' ? it.e : undefined,
+    model: typeof it.m === 'string' ? it.m : undefined,
+    modelHint: typeof it.hn === 'string' && it.hn.trim() ? it.hn.trim().slice(0, 200) : undefined,
     okModel: typeof it.ok === 'boolean' ? it.ok : null,
     okConf: Number(it.okc ?? 0),
     why: typeof it.w === 'string' ? it.w.slice(0, 200) : undefined,
@@ -180,6 +208,7 @@ async function readPage(imageB64: string, grade: string): Promise<{ reading: Rea
     subject: subjectOf(raw.sub),
     diary: raw.dy === true,
     tasks: Array.isArray(raw.tk) ? raw.tk : [],
+    page: clampRegion(Array.isArray(raw.pg) && raw.pg.length === 4 ? { x: raw.pg[0], y: raw.pg[1], w: raw.pg[2], h: raw.pg[3] } : undefined),
   };
   return { reading, usage: body.usage };
 }
@@ -291,6 +320,10 @@ Deno.serve(async (req) => {
     }
     lap('download_ms');
 
+    const hintLang =
+      childSetting && childSetting !== 'auto'
+        ? `in ${SPEAKING_STYLE[tutorLang(childSetting, null)]}`
+        : `in the page's language (French page: simple French; Arabic page: simple Modern Standard Arabic, speaking to a girl; English page: simple English)`;
     // Earlier observations are fetched while the model reads the page.
     const previousQuery = admin
       .from('observations')
@@ -298,7 +331,7 @@ Deno.serve(async (req) => {
       .eq('session_id', snap.session_id)
       .order('created_at', { ascending: true });
     const [{ reading, usage }, { data: previous }, sincePraise, sinceEncourage, sessionRot] = await Promise.all([
-      readPage(b64, grade),
+      readPage(b64, grade, hintLang),
       previousQuery,
       secondsSinceLast(snap.session_id, 'praise'),
       secondsSinceLast(snap.session_id, 'encourage'),
@@ -326,7 +359,7 @@ Deno.serve(async (req) => {
     if ((!reading.page_visible || reading.hand_blocking) && checkAll) {
       const lang = tutorLang(childSetting, reading.language);
       const text = { fr: 'Je ne vois pas bien la page. Montre-moi le cahier, puis appuie sur Corriger.', ar: 'ما كنشوفش الصفحة مزيان. ورّيني الكونّاش، ومن بعد ورّكي على صحّح.', fus: 'لا أرى الصفحة جيدًا. أريني الدفتر، ثم اضغطي على صحّح.', en: 'I can’t see the page well. Show me the notebook, then press Check.' }[lang];
-      const audioUrl = await speechUrl(text, lang);
+      const audioUrl = await speechUrl(text, lang, snap.household_id);
       send('snapshot.rejected', { snapshot_id: snap.id, reason: reading.page_visible ? 'hand_blocking' : 'no_page' });
       await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'encourage', text, language: lang, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
       inBackground(Promise.resolve(admin.from('snapshots').update({ status: 'skipped' }).eq('id', snap.id)));
@@ -371,7 +404,7 @@ Deno.serve(async (req) => {
       if (diaryPlan && (await savePlan(snap.session_id, diaryPlan))) {
         send('plan.changed', { plan: diaryPlan });
         const text = planText(language, diaryPlan);
-        const audioUrl = await speechUrl(text, language);
+        const audioUrl = await speechUrl(text, language, snap.household_id);
         const messageId = crypto.randomUUID();
         await send('tutor.say', { message_id: messageId, kind: 'explain', text, language, ...(audioUrl ? { audio_url: audioUrl } : {}), snapshot_id: snap.id, annotations: [] });
         send('analysis.done', { snapshot_id: snap.id, read: 0, new: 0, right: 0, wrong: 0, quiet: false });
@@ -412,6 +445,19 @@ Deno.serve(async (req) => {
       if (isCorrect === true && digitCount(expected!) >= 4 && (i.confidence ?? 0) < PRAISE_CONFIDENCE_LONG) {
         isCorrect = null; // not sure enough to praise a long answer: stay quiet
       }
+      // Handwriting practice: checked in code against the model letter (any form), never left "unchecked".
+      const model = i.type === 'copy' || i.model ? copyModel(i.key, i.model) : null;
+      const copied = model ? checkCopy(model, i.child_answer) : null;
+      if (copied) {
+        return {
+          ...i,
+          expected: model,
+          isCorrect: copied.ok,
+          checkedBy: 'code' as const,
+          why: copied.ok ? undefined : `on the line of "${model}" she wrote ${copied.wrong.map((w) => `"${w}"`).join(', ')}, which is not "${model}"`,
+          copy: true,
+        };
+      }
       // Open answers (a word, a sentence, a reading question): checked by meaning against the page.
       // "Wrong" only when the model is very sure: a false "wrong" hurts more than a missed one.
       let checkedBy: 'code' | 'meaning' | null = isCorrect === null ? null : 'code';
@@ -420,8 +466,58 @@ Deno.serve(async (req) => {
         else if (i.okModel === true && (i.okConf ?? 0) >= 0.8) isCorrect = true;
         if (isCorrect !== null) checkedBy = 'meaning';
       }
-      return { ...i, expected, isCorrect, checkedBy };
+      return { ...i, expected, isCorrect, checkedBy, copy: false };
     });
+
+    // Fast reading + "wrong": read the page again with the deeper effort before saying it. Same answer = confirmed
+    // (and the deeper hint is used); another answer = not sure, Silia stays quiet rather than a false "wrong".
+    const suspects = judged.filter((j) => j.isCorrect === false && !j.copy);
+    if (VERIFY_EFFORT && VERIFY_EFFORT !== READ_EFFORT && suspects.length) {
+      const { reading: again } = await readPage(b64, grade, hintLang, VERIFY_EFFORT);
+      lap('verify_wrong_ms');
+      const compact = (x: string | null | undefined) => String(x ?? '').toLowerCase().replace(/\s+/g, '');
+      const centre = (r?: Region) => (r ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : null);
+      for (const j of suspects) {
+        const c = centre(j.region);
+        const twin =
+          again.items.find((i) => normKey(i.key) === j.key) ??
+          again.items.find((i) => {
+            const d = centre(clampRegion(i.region));
+            return !!c && !!d && Math.abs(c.x - d.x) < 0.04 && Math.abs(c.y - d.y) < 0.04;
+          });
+        if (twin && compact(twin.child_answer) === compact(j.child_answer)) {
+          if (twin.modelHint) j.modelHint = twin.modelHint;
+        } else {
+          log('wrong not confirmed by the deeper reading: quiet', { k: j.key, fast: j.child_answer, deep: twin?.child_answer ?? null });
+          j.isCorrect = null;
+        }
+      }
+    }
+
+    // Before praising a copy line: a second, focused look at each slot (the first reading tends to see the model letter).
+    const copyToPraise = judged.filter((j) => j.copy && j.isCorrect === true);
+    if (copyToPraise.length) {
+      const seen = await verifyCopyLines(
+        b64,
+        copyToPraise.map((j) => ({ model: String(j.expected), region: j.region })),
+        MODEL,
+      );
+      lap('copy_verify_ms');
+      copyToPraise.forEach((j, n) => {
+        const letters = seen[n];
+        if (!letters) {
+          j.isCorrect = null; // not verified: stay quiet rather than a false "Bravo"
+          return;
+        }
+        const again = checkCopy(String(j.expected), letters.join(' '));
+        if (again && !again.ok) {
+          log('copy verify caught a mistake', { model: j.expected, first: j.child_answer, second: letters });
+          j.isCorrect = false;
+          j.child_answer = letters.join(' ');
+          j.why = `on the line of "${j.expected}" she wrote ${again.wrong.map((w) => (w === '?' ? 'a badly formed letter' : `"${w}"`)).join(', ')}, which is not "${j.expected}"`;
+        }
+      });
+    }
 
     log('judged', {
       language,
@@ -466,7 +562,13 @@ Deno.serve(async (req) => {
     if (wrong.length) {
       const w = wrong[0];
       kind = 'hint';
-      const written = await writeHint(w.key, w.child_answer, w.expected ?? '', language, grade, w.why);
+      // Copy exercise: the model is printed on the page, so naming it is fine (no answer-leak filter).
+      // The hint written during the reading saves a second call, unless a better one is needed (her own calculation
+      // slip, a copy mistake caught by the second look) or it gives the answer away.
+      const leaks = (h: string) => !!w.expected && !w.copy && new RegExp(`(^|\\D)${String(w.expected).replace('.', '\\.')}(\\D|$)`).test(h);
+      const quick = w.modelHint && !w.copy && !ownCalculationSlip(w.child_answer) && !leaks(w.modelHint) ? w.modelHint : null;
+      const written = quick ?? (await writeHint(w.key, w.child_answer, w.copy ? '' : (w.expected ?? ''), language, grade, w.why));
+      if (quick) log('hint from the reading (no second call)', quick);
       familiar = !written;
       text = written || pick(phrases.hint);
       lap('hint_ms');
@@ -577,9 +679,11 @@ Deno.serve(async (req) => {
     // Fast path: voice, then tell the Board. Saving happens after the response, in the background.
     const messageId = crypto.randomUUID();
     if (kind) {
+      // Ticks and circles first: the Board marks the page while the voice is being made.
+      if (annotations.length) send('board.annotate', { snapshot_id: snap.id, annotations, clear: true, keep_mood: true });
       // Familiar phrases: send the cached file's path, the Board already has it. New sentences: ElevenLabs.
       const phrase = familiar ? await phrasePath(text, language) : null;
-      const audioUrl = familiar ? null : await speechUrl(text, language);
+      const audioUrl = familiar ? null : await speechUrl(text, language, snap.household_id);
       lap('tts_ms');
       await send('tutor.say', {
         message_id: messageId,
@@ -638,6 +742,8 @@ Deno.serve(async (req) => {
     );
     lap('save_ms');
     const result = {
+      // The Camera crops its next photos to the page (smaller image, faster reading).
+      page_box: reading.page ?? null,
       quiet_reason: quietReason,
       read: written.length,
       action: kind ?? 'silent',
@@ -651,6 +757,20 @@ Deno.serve(async (req) => {
       voice: kind ? (familiar ? 'phrase' : lastTtsError ? `error: ${lastTtsError}` : 'elevenlabs') : 'none',
     };
     console.log('result', JSON.stringify(result));
+    logTurn({
+      fn: 'analyze-snapshot',
+      session_id: snap.session_id,
+      household_id: snap.household_id,
+      turn_id: turn?.id ?? null,
+      priority: turn?.priority ?? null,
+      ms: result.ms,
+      timings: t,
+      model: READ_MODEL,
+      effort: READ_EFFORT,
+      usage,
+      outcome: result.action,
+      extra: { read: result.read, new: result.new_items, quiet: quietReason ?? null, image_kb: Math.round((b64.length * 0.75) / 1000) },
+    });
     return json(result);
   } catch (e) {
     console.error(e);
