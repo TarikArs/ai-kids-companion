@@ -4,7 +4,7 @@
 import { expectedAnswer, ownCalculationSlip, sameAnswer } from './arithmetic.ts';
 import { checkCopy, copyModel } from './copy.ts';
 import { broadcast, type Turn } from './broadcast.ts';
-import { FOCUS_TEXT, isArabic, LANGUAGE_NAME, PHRASES, SPEAKING_STYLE, tutorLang, VERDICT_TEXT, type Lang } from './language.ts';
+import { FOCUS_TEXT, isArabic, KID_WORDS, LANGUAGE_NAME, PHRASES, SPEAKING_STYLE, tutorLang, VERDICT_TEXT, type Lang } from './language.ts';
 import { HELP_ACTIONS, type Decision, type FocusState, type HelpAction, type Intent, type Practice } from './intent.ts';
 import { downloadB64, pageText, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
 import { admin } from './supabase.ts';
@@ -173,18 +173,20 @@ ${others ? `Other exercises on the page (context only, do not work on them): ${o
 function languageRule(c: HelpCtx): string {
   const forced = forcedLang(c);
   return forced
-    ? `Write ONLY in ${LANGUAGE_NAME[forced]}, whatever the page's language${isArabic(forced) ? ', speaking to a girl (feminine forms)' : ''}. Put "lang":"${forced}".`
-    : `Write in the exercise's own language: French page -> clear simple French; Arabic page -> simple Modern Standard Arabic (Fusha) in Arabic script, speaking to a girl (feminine forms), "lang":"fus"; English page -> simple English.`;
+    ? `Write ONLY in ${LANGUAGE_NAME[forced]}, whatever the page's language${isArabic(forced) ? ', speaking to a girl (feminine forms)' : ''}. Put "lang":"${forced}".
+Use ${KID_WORDS}.`
+    : `Write in the exercise's own language: French page -> French; Arabic page -> simple Modern Standard Arabic (Fusha) in Arabic script, speaking to a girl (feminine forms), "lang":"fus"; English page -> English.
+Use ${KID_WORDS}.`;
 }
 
 function taskFor(c: HelpCtx, action: HelpAction, level: number): string {
-  const len = c.advanced ? 'max 16 words per sentence' : 'max 10 words per sentence';
+  const len = c.advanced ? 'max 12 words per sentence' : 'max 10 words per sentence';
   switch (action) {
     case 'explain':
       return `TASK: explain the ACTIVE EXERCISE. Do NOT just read the instruction back. Think first (what is asked, the method, the traps).
 Say in your own words what has to be done, give the method step by step at the level of ${c.grade}${
-        c.advanced ? ' (proper school vocabulary)' : ' (very concrete: fingers, objects, start from the bigger number…)'
-      }, work ONE similar example with DIFFERENT numbers or words, then invite her to try.
+        c.advanced ? ' (the school word only if it is in the exercise, explained with easy words)' : ' (very concrete: fingers, objects, start from the bigger number…)'
+      }, work ONE similar example with DIFFERENT numbers or words, as concrete objects when it fits (e.g. « 7 chatons, 3 partent jouer : il en reste 4 »), worked fully, then invite her to try.
 ${level >= 2 ? 'She already heard an explanation and is still stuck: explain it differently, simpler and more concrete, one step per sentence.' : ''}
 ${c.advanced ? '5 to 9' : '4 to 7'} sentences, ${len}. NEVER give the answer of an item on the page.`;
     case 'solve':

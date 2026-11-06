@@ -31,12 +31,24 @@ export function langOf(code: string | undefined | null): Lang {
   return 'fr';
 }
 
-/** How the tutor must write, given to the model. The child is a girl: feminine forms in Darija. */
+/**
+ * Silia talks to a little girl: very, very easy everyday words, short sentences, no hard school words (or explained in
+ * easy words), and lovely, concrete examples. Added to every prompt that writes something she hears.
+ */
+export const KID_WORDS =
+  'very, very easy everyday words that a little girl knows, short sentences (max 10 words), one idea per sentence; ' +
+  'no difficult school words (if one is in her exercise, say what it means with easy words); ' +
+  'when an example helps, its objects can be lovely things she knows (kittens, little birds, teddy bears, flowers, apples, ' +
+  'cupcakes), but ONLY as the real objects of the example (« 3 paniers de 4 pommes : 4, 8, 12 pommes »), never an animal ' +
+  'that just "shows" or "says" something; if no such object fits naturally, use none; every sentence must make sense on its own; ' +
+  'never start with your name or « Silia est là »; warm and gentle, like a kind big sister';
+
+/** How the tutor must write, given to the model. The child is a girl: feminine forms in Arabic. */
 export const SPEAKING_STYLE: Record<Lang, string> = {
-  fr: 'simple French that a 6-year-old understands',
-  ar: 'Moroccan Darija (not Modern Standard Arabic), written in Arabic script, simple words a 6-year-old in Morocco understands, speaking to a girl (feminine forms)',
-  fus: 'simple Modern Standard Arabic (Fusha) in Arabic script, short clear words a young child understands, speaking to a girl (feminine forms)',
-  en: 'simple English that a 6-year-old understands',
+  fr: `French, with ${KID_WORDS}`,
+  ar: `Moroccan Darija (not Modern Standard Arabic), written in Arabic script, speaking to a girl (feminine forms), with ${KID_WORDS}`,
+  fus: `simple Modern Standard Arabic (Fusha) in Arabic script, speaking to a girl (feminine forms), with ${KID_WORDS}`,
+  en: `English, with ${KID_WORDS}`,
 };
 
 export type PhraseKind = 'praise' | 'encourage' | 'hint' | 'explain' | 'filler' | 'greeting' | 'pause' | 'resume' | 'end' | 'ask' | 'read_good';

@@ -112,7 +112,7 @@ interface RawItem {
 }
 
 export const DEFAULT_HINT_LANG =
-  "in the page's language (French page: simple French; Arabic page: simple Modern Standard Arabic, speaking to a girl; English page: simple English)";
+  "in the page's language (French page: French; Arabic page: simple Modern Standard Arabic, speaking to a girl; English page: English), with very, very easy words a little girl knows, no difficult school words";
 
 /** Reads the page (one vision call). */
 export async function readPage(imageB64: string, grade: string, hintLang = DEFAULT_HINT_LANG, effort = READ_EFFORT): Promise<Reading> {
