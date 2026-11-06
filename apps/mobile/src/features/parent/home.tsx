@@ -72,9 +72,6 @@ export function ParentHome({
   const [busy, setBusy] = useState<DeviceRole | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [advanced, setAdvanced] = useState(false);
-  const [voices, setVoices] = useState('');
-  const [warming, setWarming] = useState(false);
   const setDevice = useAppStore((s) => s.setDevice);
   const setRole = useAppStore((s) => s.setRole);
 
@@ -163,14 +160,6 @@ export function ParentHome({
     onChanged();
   }
 
-  async function warmVoices() {
-    setWarming(true);
-    setVoices('');
-    const { data, error: e } = await supabase.functions.invoke('warm-phrases', { body: {} });
-    setWarming(false);
-    if (e) return setVoices(`Erreur : ${await functionError(e)}`);
-    setVoices(`${data.ready} phrases prêtes${data.failed?.length ? `, ${data.failed.length} en erreur` : ''}.`);
-  }
 
   const hasCamera = devices.some((d) => d.role === 'camera');
 
@@ -325,19 +314,6 @@ export function ParentHome({
           </View>
         </View>
       ) : null}
-
-      {/* advanced */}
-      <Pressable accessibilityRole="button" onPress={() => setAdvanced((v) => !v)} style={styles.advancedToggle}>
-        <Text style={styles.sub}>{advanced ? '▾' : '▸'} Avancé</Text>
-      </Pressable>
-      {advanced ? (
-        <View style={styles.section}>
-          <Text style={styles.rowTitle}>Voix de {TUTOR_NAME}</Text>
-          <Body muted>Prépare une fois les phrases habituelles (Bravo, Hmm…). À refaire seulement si une voix change.</Body>
-          {voices ? <Body>{voices}</Body> : null}
-          <Button label="Préparer les voix" variant="secondary" onPress={warmVoices} loading={warming} />
-        </View>
-      ) : null}
     </Screen>
   );
 }
@@ -409,5 +385,4 @@ const styles = StyleSheet.create({
   thisPhone: { flexDirection: 'row', alignItems: 'center', gap: space.md, borderWidth: 2, borderColor: colors.accent },
   chevron: { color: colors.muted, fontSize: 30, fontWeight: '300' },
   report: { color: colors.text, fontSize: 15, lineHeight: 22 },
-  advancedToggle: { alignSelf: 'flex-start', paddingVertical: space.sm },
 });

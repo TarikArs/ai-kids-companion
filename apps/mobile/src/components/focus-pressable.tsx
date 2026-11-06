@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
+  Platform,
   Pressable,
   type PressableProps,
   type PressableStateCallbackType,
@@ -12,13 +13,26 @@ import { colors } from '@/lib/theme';
 type State = PressableStateCallbackType & { focused: boolean };
 
 /**
+ * When the last touch, click or tap happened. A focus that follows it comes from the finger or the mouse, not from
+ * a TV remote or a keyboard: no ring then (like the web's :focus-visible), so a tapped button never stays "active".
+ */
+let lastPointerAt = 0;
+const POINTER_FOCUS_MS = 800;
+if (Platform.OS === 'web' && typeof globalThis.addEventListener === 'function') {
+  globalThis.addEventListener('pointerdown', () => (lastPointerAt = Date.now()), true);
+}
+const fromPointer = () => Date.now() - lastPointerAt < POINTER_FOCUS_MS;
+
+/**
  * Pressable that works with a TV remote (D-pad) and a keyboard: it can take focus, shows a clear yellow ring
- * and grows a little when focused, and OK/Enter presses it. Same API as Pressable; `style` may use `focused`.
+ * and grows a little when focused by the remote or the keyboard, and OK/Enter presses it.
+ * Touch and mouse never show the ring. Same API as Pressable; `style` may use `focused`.
  */
 export function FocusPressable({
   style,
   onFocus,
   onBlur,
+  onPressIn,
   focusStyle,
   preferFocus = false,
   disabled,
@@ -37,6 +51,11 @@ export function FocusPressable({
     if (preferFocus) (ref.current as unknown as { focus?: () => void } | null)?.focus?.();
   }, [preferFocus]);
 
+  // A button that becomes disabled (loading) gets no blur event: drop its ring, or it would stay lit.
+  useEffect(() => {
+    if (disabled) setFocused(false);
+  }, [disabled]);
+
   return (
     <Pressable
       ref={ref}
@@ -44,8 +63,13 @@ export function FocusPressable({
       {...({ hasTVPreferredFocus: preferFocus } as object)}
       disabled={disabled}
       focusable={!disabled}
+      onPressIn={(e) => {
+        // Touch on a phone (a TV remote's OK has no touch position).
+        if (Platform.OS !== 'web' && !Platform.isTV) lastPointerAt = Date.now();
+        onPressIn?.(e);
+      }}
       onFocus={(e) => {
-        setFocused(true);
+        if (!fromPointer()) setFocused(true);
         onFocus?.(e);
       }}
       onBlur={(e) => {

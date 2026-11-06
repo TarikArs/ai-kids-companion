@@ -53,26 +53,9 @@ export interface ExerciseFocus {
   at: string;
 }
 
-/** A turn of the conversation. The child's turns may interrupt Silia; automatic ones (a photo) never do. */
+/** One request of the child (a button, her voice): the Board drops messages of older requests. */
 export interface TurnRef {
   id: string;
-  priority: 'child' | 'auto';
-}
-
-/** Subjects of the evening, read from the homework diary. */
-export type Subject = 'math' | 'french' | 'arabic' | 'english' | 'science' | 'islamic' | 'social' | 'other';
-
-export interface PlanItem {
-  id: string;
-  subject: Subject;
-  /** As written in the diary ("Maths p. 42"). */
-  label: string;
-  status: 'todo' | 'active' | 'done';
-}
-
-export interface SessionPlan {
-  items: PlanItem[];
-  snapshot_id?: string;
 }
 
 /** End of session: what Silia says to the child, and the report for the parent. */
@@ -87,41 +70,34 @@ export interface SessionSummary {
   at: string;
 }
 
-/** What the Board is doing: the Camera takes automatic photos only while it is "watching". */
-export type BoardState = 'watching' | 'busy';
+/** One line of the checked exercise. right / wrong: checked in code; unsure: hard to read; open: Silia asks Lina. */
+export interface ResultLine {
+  q: string;
+  a: string | null;
+  status: 'right' | 'wrong' | 'unsure' | 'empty' | 'open';
+}
 
 export interface SessionEvents {
-  'capture.tick': { next_capture_at: string };
-  /** Board "Corriger": ask the Camera to take a photo now and check every answer. */
-  'capture.request': { mode: 'check'; request_id?: string };
+  /** Board « Silia, regarde »: ask the Camera to take a photo now. */
+  'capture.request': { request_id: string };
   /** Camera: "I am taking the photo" for this request. No ack within 2 s: the Board checks its current photo itself. */
   'capture.ack': { request_id: string };
   /** Camera: the requested photo could not be taken or sent (too dark, error). The Board checks its current photo. */
   'capture.failed': { request_id: string; reason: string };
   'snapshot.new': { snapshot_id: string; storage_path: string };
+  /** Silia is working on a request. snapshot_id: she is reading this photo (the Board shows the scan). */
   'tutor.thinking': { snapshot_id?: string; turn?: TurnRef };
-  /** Board state, sent on every change: Watching or busy (looking, speaking, listening). */
-  'board.state': { state: BoardState };
   /** The page orientation of this session (set by the first photo, or the Board's rotate button). */
   'session.rotation': { rotation: 0 | 90 | 180 | 270 };
-  /** The server found no readable page on this photo: the Board goes back to the last good one. */
+  /** The server found no readable page on this photo. */
   'snapshot.rejected': { snapshot_id: string; reason: string };
-  /** The photo is sideways/upside down: the Board turns it clockwise by this angle. */
-  'snapshot.rotation': { snapshot_id: string; rotation: 0 | 90 | 180 | 270 };
-  'observation.created': {
-    snapshot_id: string;
-    item_id: string;
-    observed: string | null;
-    is_correct: boolean | null;
-    confidence: number;
-  };
   'tutor.say': {
     message_id: string;
     kind: TutorKind;
     text: string;
     language: string;
     audio_url?: string;
-    /** Name of a bundled pre-recorded phrase, played instead of audio_url. */
+    /** Storage path of a cached familiar phrase, played instead of audio_url. */
     phrase?: string;
     snapshot_id?: string;
     annotations: Annotation[];
@@ -129,6 +105,7 @@ export interface SessionEvents {
     /** The exercise this message is about. */
     exercise_index?: number;
   };
+  /** Several exercises on the page (or "which one?"): the choices, and the one Silia suggests. */
   'tutor.ask_exercise': {
     snapshot_id: string;
     language: string;
@@ -136,27 +113,25 @@ export interface SessionEvents {
     phrase?: string;
     audio_url?: string;
     choices: ExerciseChoice[];
+    suggested?: number;
     turn?: TurnRef;
-    /** The help waiting for the choice ("explain it" with several exercises on the page). */
+    /** The help waiting for the choice. */
     action?: HelpAction;
   };
-  /** What the server saw on a photo, also when Silia stays quiet (so the screens never look frozen). */
-  'analysis.done': {
-    snapshot_id: string;
-    /** Answers read on the page. */
-    read: number;
-    new: number;
-    right: number;
-    wrong: number;
-    /** true: Silia says nothing about this photo. */
-    quiet: boolean;
-    reason?: 'nothing_new' | 'unsure' | 'no_answers' | 'not_checkable' | 'cooldown' | 'no_page' | 'hand_blocking';
+  /** The exercise was checked: one line per item (verdict), or Silia asks for Lina's answer (guide), or it is not started. */
+  'exercise.result': {
+    snapshot_id?: string;
+    exercise_index: number;
+    title: string;
+    label?: string;
+    mode: 'verdict' | 'guide' | 'start';
+    lines: ResultLine[];
+    /** Her work on the practice exercise (« Exercice similaire »), not on her page. */
+    practice?: boolean;
+    /** All right: the next exercise on the page, one tap away. */
+    next?: { index: number; title: string; label?: string };
     turn?: TurnRef;
   };
-  /** The evening's plan changed (diary read, a subject started or finished). */
-  'plan.changed': { plan: SessionPlan };
-  /** A subject is finished: a short break before the next one (the Camera waits, the Board counts down). */
-  'session.break': { seconds: number; next?: string; language: string };
   /** A similar exercise to practise, shown on the Board (questions only). */
   'practice.show': {
     exercise_index: number;
@@ -171,13 +146,11 @@ export interface SessionEvents {
   };
   /** Active exercise changed (voice, tap or the only exercise on the page). null = no focus. */
   'focus.changed': { focus: ExerciseFocus | null; by: 'voice' | 'tap' | 'auto' };
-  /** keep_mood: marks shown ahead of Silia's sentence (the turn is not over). */
-  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean; keep_mood?: boolean; turn?: TurnRef };
+  'board.annotate': { snapshot_id: string; annotations: Annotation[]; clear?: boolean; turn?: TurnRef };
   'tutor.speaking.end': { message_id: string };
   'child.talk.start': Record<string, never>;
   'child.talk.end': Record<string, never>;
   'child.transcript': { utterance_id: string; text: string };
-  'parent.message': { message_id: string; from_name: string; text?: string; voice_url?: string };
   'session.state': { status: SessionStatus };
 }
 

@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { Image, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Ellipse, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
+import { ScanOverlay } from '@/components/scan-overlay';
+
 interface Props {
   uri: string;
   width: number;
@@ -10,10 +12,12 @@ interface Props {
   annotations: Annotation[];
   /** Degrees clockwise to show the page upright (phone lying flat). Marks turn with the photo. */
   rotation?: number;
+  /** The photo is being read: scan effect over it. */
+  scanning?: boolean;
 }
 
 /** Notebook photo fitted in its box, with chalk marks drawn over the child's answers. */
-export function AnnotatedPhoto({ uri, width, height, annotations, rotation = 0 }: Props) {
+export function AnnotatedPhoto({ uri, width, height, annotations, rotation = 0, scanning = false }: Props) {
   const [box, setBox] = useState({ w: 0, h: 0 });
   const onLayout = (e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
 
@@ -33,6 +37,7 @@ export function AnnotatedPhoto({ uri, width, height, annotations, rotation = 0 }
               <Mark key={i} a={a} W={W} H={H} />
             ))}
           </Svg>
+          {scanning ? <ScanOverlay /> : null}
         </View>
       ) : null}
     </View>

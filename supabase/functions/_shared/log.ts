@@ -20,7 +20,6 @@ export function logTurn(row: {
   session_id: string;
   household_id: string;
   turn_id?: string | null;
-  priority?: string | null;
   ms: number;
   timings?: Record<string, number>;
   model?: string;

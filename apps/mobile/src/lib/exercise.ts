@@ -17,8 +17,8 @@ export const exerciseName = (e: { index: number; label?: string }) => e.label ??
 
 export const ACTION_LABEL: Record<HelpAction, string> = {
   explain: 'Expliquer',
-  solve: 'Résoudre',
-  correct: 'Corriger',
+  solve: 'Résoudre ensemble',
+  correct: 'Vérifier',
   similar: 'Exercice similaire',
 };
 
@@ -30,7 +30,7 @@ export const ACTION_LABEL: Record<HelpAction, string> = {
  */
 export async function requestHelp(
   sessionId: string,
-  opts: { choice?: ExerciseChoice; action?: HelpAction | 'choose'; turn?: { id: string; priority: 'child' | 'auto' } } = {},
+  opts: { choice?: ExerciseChoice; action?: HelpAction | 'choose'; turn?: { id: string } } = {},
 ): Promise<{ data: any; error: string | null }> {
   log('exercise', `help: ${opts.choice ? `tap exercise ${exerciseName(opts.choice)}` : ''}${opts.action ? ` action ${opts.action}` : ''}` || 'help: explain');
   const { data, error } = await supabase.functions.invoke('explain-exercise', {
@@ -38,7 +38,7 @@ export async function requestHelp(
       session_id: sessionId,
       ...(opts.choice ? { exercise_index: opts.choice.index } : {}),
       ...(opts.action ? { action: opts.action } : {}),
-      turn: opts.turn ?? newTurn('child'),
+      turn: opts.turn ?? newTurn(),
     },
   });
   return { data, error: error ? await functionError(error) : null };
@@ -48,11 +48,11 @@ export async function requestHelp(
 export async function sendTyped(
   sessionId: string,
   text: string,
-  turn?: { id: string; priority: 'child' | 'auto' },
+  turn?: { id: string },
 ): Promise<{ data: any; error: string | null }> {
   log('exercise', `typed: ${text}`);
   const { data, error } = await supabase.functions.invoke('child-talk', {
-    body: { session_id: sessionId, text, turn: turn ?? newTurn('child') },
+    body: { session_id: sessionId, text, turn: turn ?? newTurn() },
   });
   return { data, error: error ? await functionError(error) : null };
 }

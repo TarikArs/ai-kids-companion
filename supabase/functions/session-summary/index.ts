@@ -1,7 +1,7 @@
 // session-summary: end of the session, like a teacher. Called by the Camera's "Terminer" before the session closes.
 //
 // POST { session_id, turn? }   Caller: a member of the household.
-// 1. Gathers what happened: plan, answers checked (right / wrong), hints, explanations, reading fixes, duration.
+// 1. Gathers what happened: answers checked (right / wrong), hints, explanations, reading fixes, duration.
 // 2. One text-only call writes two texts: a short spoken recap for the child (real achievements + ONE thing to practise)
 //    and a short report for the parent.
 // 3. Silia says the recap on the Board; the report is saved on the session (homework_sessions.summary) for the parent app.
@@ -10,7 +10,6 @@ import { corsHeaders, json } from '../_shared/cors.ts';
 import { parseTurn, turnSender } from '../_shared/broadcast.ts';
 import { gradeLabel, SPEAKING_STYLE, tutorLang, type Lang } from '../_shared/language.ts';
 import { makeLog } from '../_shared/log.ts';
-import type { SessionPlan } from '../_shared/plan.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
 import { speechUrl } from '../_shared/tts.ts';
 
@@ -46,11 +45,10 @@ Deno.serve(async (req) => {
   send('tutor.thinking', {});
 
   try {
-    const [{ data: obs }, { data: msgs }, { data: talk }, planRow] = await Promise.all([
+    const [{ data: obs }, { data: msgs }, { data: talk }] = await Promise.all([
       admin.from('observations').select('item_id, observed_answer, is_correct, created_at').eq('session_id', session.id).order('created_at'),
       admin.from('tutor_messages').select('kind, text, language, action, created_at').eq('session_id', session.id).neq('kind', 'system').order('created_at'),
       admin.from('child_utterances').select('transcript').eq('session_id', session.id),
-      admin.from('homework_sessions').select('plan').eq('id', session.id).maybeSingle(),
     ]);
     // Latest verdict per item (an answer corrected later counts as right).
     const latest = new Map<string, { a: string | null; ok: boolean | null }>();
@@ -60,14 +58,12 @@ Deno.serve(async (req) => {
     const wrongNow = verdicts.filter((v) => v.ok === false).length;
     const fixedLater = (obs ?? []).filter((o) => o.is_correct === false).map((o) => o.item_id).filter((id) => latest.get(id)?.ok === true);
     const minutes = Math.max(1, Math.round((Date.now() - Date.parse(session.started_at)) / 60_000));
-    const plan = (planRow.error ? null : (planRow.data?.plan as SessionPlan | null)) ?? null;
     const language: Lang = tutorLang(child?.tutor_language, msgs?.at(-1)?.language ?? 'fr');
     const helped = (msgs ?? []).filter((m) => m.kind === 'hint' || m.kind === 'explain').map((m) => m.text).slice(-8);
     const readingFixes = (msgs ?? []).map((m) => String(m.action ?? '')).filter((a) => a.startsWith('reading_fix:')).map((a) => a.slice(12));
 
     const facts = {
       minutes,
-      subjects: plan?.items.map((i) => `${i.label} (${i.status})`) ?? [],
       answers_checked: verdicts.length,
       right,
       still_wrong: wrongNow,

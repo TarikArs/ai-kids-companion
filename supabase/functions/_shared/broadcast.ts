@@ -15,15 +15,14 @@ export async function broadcast(topic: string, event: string, payload: unknown):
   if (!res.ok) console.error('broadcast failed', event, res.status, await res.text());
 }
 
-/** A turn of the conversation: who started it decides who may interrupt whom (child > auto). */
+/** One request of the child (a button, her voice): the Board drops messages of older requests. */
 export interface Turn {
   id: string;
-  priority: 'child' | 'auto';
 }
 
 export function parseTurn(x: unknown): Turn | null {
   const t = x as Partial<Turn> | null | undefined;
-  return t && typeof t.id === 'string' && (t.priority === 'child' || t.priority === 'auto') ? { id: t.id.slice(0, 64), priority: t.priority } : null;
+  return t && typeof t.id === 'string' ? { id: t.id.slice(0, 64) } : null;
 }
 
 /** Broadcast that carries the turn it belongs to, so the Board can drop or queue stale messages. */

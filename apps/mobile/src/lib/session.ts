@@ -9,11 +9,10 @@ export interface HomeworkSession {
   household_id: string;
   child_id: string;
   status: SessionStatus;
-  capture_interval_s: number;
   started_at: string;
 }
 
-const SESSION_COLUMNS = 'id, household_id, child_id, status, capture_interval_s, started_at';
+const SESSION_COLUMNS = 'id, household_id, child_id, status, started_at';
 
 /** The household's current session (active or paused), if any. */
 export async function findOpenSession(householdId: string): Promise<HomeworkSession | null> {
@@ -41,7 +40,7 @@ export async function startSession(householdId: string): Promise<HomeworkSession
   if (childErr) throw childErr;
   const { data, error } = await supabase
     .from('homework_sessions')
-    .insert({ household_id: householdId, child_id: child.id, subject: 'maths', language: 'fr' })
+    .insert({ household_id: householdId, child_id: child.id })
     .select(SESSION_COLUMNS)
     .single();
   if (error) throw error;
@@ -87,7 +86,7 @@ export function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-/** A new conversation turn: the child's turns may interrupt Silia, automatic ones never do. */
-export function newTurn(priority: 'child' | 'auto'): { id: string; priority: 'child' | 'auto' } {
-  return { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, priority };
+/** A new request of the child (a button, her voice), echoed on every message of the answer. */
+export function newTurn(): { id: string } {
+  return { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` };
 }

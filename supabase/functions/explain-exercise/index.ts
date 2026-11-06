@@ -87,7 +87,6 @@ Deno.serve(async (req) => {
       session_id: session.id,
       household_id: session.household_id,
       turn_id: turn?.id ?? null,
-      priority: 'child',
       ms: Date.now() - started,
       outcome: `${intent.act}:${outcome.done}`,
       extra: { page: snap?.exercises ? 'cached' : 'read now' },

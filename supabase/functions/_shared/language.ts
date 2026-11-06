@@ -118,31 +118,59 @@ export function readingFix(lang: Lang, wordsToFix: string[]): string {
   }
 }
 
-/** "Corriger" answers that are not familiar phrases (generated once, then cached by text). */
-export const CHECK_TEXT: Record<Lang, { allGood: string; cannotCheck: string; noAnswer: string; unsure: string }> = {
+/** Verdicts and the exercise choice: fixed sentences (no AI), cached as audio after the first time. */
+export const VERDICT_TEXT: Record<
+  Lang,
+  {
+    allGood: string;
+    rightPrefix: (n: number) => string;
+    unsure: (q: string, a: string) => string;
+    notStarted: (n: string) => string;
+    pick: (count: number, n: string) => string;
+    next: (n: string) => string;
+    guide: string;
+    practiceDone: string;
+  }
+> = {
   fr: {
-    allGood: 'J’ai tout vérifié : tout est juste, bravo !',
-    cannotCheck: 'Je ne peux pas vérifier cet exercice seule. Demande à papa ou maman de regarder avec toi.',
-    noAnswer: 'Je ne vois pas encore de réponse. Écris ta réponse, puis appuie sur Corriger.',
-    unsure: 'Je n’arrive pas bien à lire ta réponse. Écris un peu plus fort, ou rapproche le téléphone.',
+    allGood: 'Tout est juste, bravo !',
+    rightPrefix: (n) => (n === 1 ? 'Une juste, bravo !' : `${n} justes, bravo !`),
+    unsure: (q, a) => `Je lis « ${a} » pour ${q}. C’est bien ça ? Dis-le-moi ou écris-le.`,
+    notStarted: (n) => `Tu n’as pas encore commencé l’exercice ${n}. Tu veux que je te l’explique ?`,
+    pick: (c, n) => `Je vois ${c} exercices sur ta page. On commence par le ${n} ?`,
+    next: (n) => `Quand tu veux, on passe à l’exercice ${n}.`,
+    guide: 'Dis-moi ta réponse, ou écris-la.',
+    practiceDone: 'Bravo, l’exercice similaire est tout juste ! Quand tu veux, montre-moi ta page.',
   },
   ar: {
-    allGood: 'شفت كلشي: كلشي صحيح، برافو عليك!',
-    cannotCheck: 'ما نقدرش نصحح هاد التمرين بوحدي. طلبي من بابا ولا ماما يشوفو معاك.',
-    noAnswer: 'مازال ما شفت حتى جواب. كتبي الجواب ديالك، ومن بعد ورّكي على صحّح.',
-    unsure: 'ما قدرتش نقرا الجواب ديالك مزيان. كتبي شوية بالقوة، ولا قرّبي التيليفون.',
+    allGood: 'كلشي صحيح، برافو عليك!',
+    rightPrefix: (n) => (n === 1 ? 'وحدة صحيحة، برافو!' : `${n} صحاح، برافو!`),
+    unsure: (q, a) => `كنقرا «${a}» ف ${q}. واش هادشي اللي كتبتي؟ قوليها ليا ولا كتبيها.`,
+    notStarted: (n) => `مازال ما بديتي التمرين ${n}. بغيتي نشرحو ليك؟`,
+    pick: (c, n) => `كنشوف ${c} ديال التمارين فالصفحة ديالك. نبداو بالتمرين ${n}؟`,
+    next: (n) => `ملي تبغي، ندوزو للتمرين ${n}.`,
+    guide: 'قولي ليا الجواب ديالك، ولا كتبيه.',
+    practiceDone: 'برافو، التمرين اللي بحالو كلو صحيح! ملي تبغي، ورّيني الصفحة ديالك.',
   },
   fus: {
-    allGood: 'تحققتُ من كل شيء: كل الأجوبة صحيحة، أحسنتِ!',
-    cannotCheck: 'لا أستطيع تصحيح هذا التمرين وحدي. اطلبي من أبيكِ أو أمكِ أن ينظرا معكِ.',
-    noAnswer: 'لا أرى أي جواب بعد. اكتبي جوابكِ، ثم اضغطي على صحّح.',
-    unsure: 'لا أستطيع قراءة جوابكِ جيدًا. اكتبي بخط أوضح، أو قرّبي الهاتف.',
+    allGood: 'كل الأجوبة صحيحة، أحسنتِ!',
+    rightPrefix: (n) => (n === 1 ? 'جواب صحيح، أحسنتِ!' : `${n} أجوبة صحيحة، أحسنتِ!`),
+    unsure: (q, a) => `أقرأ «${a}» في ${q}. هل هذا ما كتبتِ؟ قوليه لي أو اكتبيه.`,
+    notStarted: (n) => `لم تبدئي التمرين ${n} بعد. هل تريدين أن أشرحه لكِ؟`,
+    pick: (c, n) => `أرى ${c} تمارين في صفحتكِ. هل نبدأ بالتمرين ${n}؟`,
+    next: (n) => `عندما تكونين مستعدة، ننتقل إلى التمرين ${n}.`,
+    guide: 'قولي لي جوابكِ، أو اكتبيه.',
+    practiceDone: 'أحسنتِ، التمرين المشابه كله صحيح! عندما تريدين، أريني صفحتكِ.',
   },
   en: {
-    allGood: 'I checked everything: it is all correct, well done!',
-    cannotCheck: 'I can’t check this exercise by myself. Ask mum or dad to look with you.',
-    noAnswer: 'I don’t see an answer yet. Write your answer, then press Check.',
-    unsure: 'I can’t read your answer well. Write a bit darker, or bring the phone closer.',
+    allGood: 'Everything is right, well done!',
+    rightPrefix: (n) => (n === 1 ? 'One right, well done!' : `${n} right, well done!`),
+    unsure: (q, a) => `I read “${a}” for ${q}. Is that right? Say it or type it.`,
+    notStarted: (n) => `You haven’t started exercise ${n} yet. Shall I explain it?`,
+    pick: (c, n) => `I can see ${c} exercises on your page. Shall we start with number ${n}?`,
+    next: (n) => `When you are ready, let’s go to exercise ${n}.`,
+    guide: 'Tell me your answer, or type it.',
+    practiceDone: 'Well done, the practice exercise is all right! Show me your page when you are ready.',
   },
 };
 
@@ -166,7 +194,7 @@ export const FOCUS_TEXT: Record<
   }
 > = {
   fr: {
-    noPhoto: 'Je n’ai pas encore de photo de ta page. Montre-moi ton cahier, puis redis-moi.',
+    noPhoto: 'Je n’ai pas encore de photo de ta page. Appuie sur « Silia, regarde ».',
     unreadable: 'Je ne vois pas bien la page : elle est trop sombre, floue ou coupée. Reprends une photo bien droite, avec de la lumière.',
     noExercise: 'Je ne trouve pas d’exercice sur cette photo. Montre-moi la page de plus près.',
     askWhich: (a) =>
@@ -175,7 +203,7 @@ export const FOCUS_TEXT: Record<
     askAction: (n, t) => `D’accord, l’exercice ${n} : ${t}. Je te l’explique, on le résout ensemble, ou je le corrige ?`,
   },
   ar: {
-    noPhoto: 'مازال ما عنديش تصويرة ديال الصفحة. ورّيني الكونّاش، ومن بعد عاودي ليا.',
+    noPhoto: 'مازال ما عنديش تصويرة ديال الصفحة. ورّكي على «سيليا، شوفي».',
     unreadable: 'ما كنشوفش الصفحة مزيان: ظلمة ولا مضبّبة ولا مقطوعة. صوّري مرة أخرى مقابلة ومع الضو.',
     noExercise: 'ما لقيتش تمرين فهاد التصويرة. قرّبي ليا الصفحة.',
     askWhich: (a) =>
@@ -184,7 +212,7 @@ export const FOCUS_TEXT: Record<
     askAction: (n, t) => `واخا، التمرين ${n}: ${t}. نشرحو ليك، نحلّوه مع بعض، ولا نصحّحو ليك؟`,
   },
   fus: {
-    noPhoto: 'ليست لديّ صورة لصفحتكِ بعد. أريني دفتركِ، ثم أعيدي طلبكِ.',
+    noPhoto: 'ليست لديّ صورة لصفحتكِ بعد. اضغطي على «سيليا، انظري».',
     unreadable: 'لا أرى الصفحة جيدًا: إنها مظلمة أو غير واضحة أو مقطوعة. التقطي صورة أخرى مستقيمة وفي الضوء.',
     noExercise: 'لا أجد تمرينًا في هذه الصورة. قرّبي الصفحة قليلًا.',
     askWhich: (a) =>
@@ -193,7 +221,7 @@ export const FOCUS_TEXT: Record<
     askAction: (n, t) => `حسنًا، التمرين ${n}: ${t}. هل أشرحه لكِ، أم نحلّه معًا، أم أصحّحه؟`,
   },
   en: {
-    noPhoto: 'I don’t have a photo of your page yet. Show me your notebook, then ask me again.',
+    noPhoto: 'I don’t have a photo of your page yet. Press “Silia, look”.',
     unreadable: 'I can’t see the page well: it is too dark, blurry or cut off. Take another photo, straight and in the light.',
     noExercise: 'I can’t find an exercise on this photo. Show me the page closer.',
     askWhich: (a) =>

@@ -25,6 +25,8 @@ export interface FocusState {
   title: string;
   label?: string;
   action?: HelpAction;
+  /** Photo the exercise was chosen on. */
+  snapshot_id?: string;
   /** Practice exercise Silia generated for this exercise (answers are secret, used to check hers). */
   practice?: Practice;
 }
