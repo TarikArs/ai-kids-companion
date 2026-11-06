@@ -294,7 +294,8 @@ export function Avatar({
   }, []);
 
   return (
-    <View style={{ width: '100%', maxWidth: 340, aspectRatio: 580 / 640 }}>
+    // Fits the space it is given (height first): it shrinks rather than covering what is above it.
+    <View style={{ height: '100%', maxHeight: 375, maxWidth: '100%', aspectRatio: 580 / 640 }}>
       <Svg width="100%" height="100%" viewBox="-60 -20 580 640">
         <Ellipse cx={250 + pose.x} cy={590} rx={130 * (1 - Math.min(0.35, -pose.bodyY / 90))} ry={11} fill="#121830" />
         <G transform={`translate(${pose.x}, ${pose.bodyY})`}>

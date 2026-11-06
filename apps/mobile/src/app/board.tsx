@@ -1,12 +1,13 @@
 import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction, SessionEvents, TurnRef } from '@hc/shared';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { Caveat_600SemiBold, Caveat_700Bold, useFonts } from '@expo-google-fonts/caveat';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
-import { Button } from '@/components/ui';
+import { TopButton } from '@/components/top-button';
 import { AnnotatedPhoto } from '@/features/board/annotated-photo';
 import { Avatar, type AvatarMood, type AvatarReaction } from '@/features/board/avatar';
 import { PracticeBoard, type PracticeView } from '@/features/board/practice-board';
@@ -55,17 +56,6 @@ const CHOICE_STATUS: Record<ExerciseChoice['status'], string> = {
   empty: 'Pas encore fait',
 };
 
-/** Wrong answers in red: on the list and circled on the photo (same red). */
-const WRONG_RED = '#FF5A5A';
-
-const LINE_COLOR: Record<ResultLine['status'], string> = {
-  right: colors.success,
-  wrong: WRONG_RED,
-  unsure: '#7FD3FF',
-  open: '#7FD3FF',
-  empty: 'transparent',
-};
-
 /** "532 − 178 = 354", "604 − 259 · à revoir", "700 − 465 · pas encore fait". */
 function lineText(l: ResultLine): string {
   const calc = /\d/.test(l.q) && /[-+−×x÷:*/]/.test(l.q);
@@ -90,6 +80,8 @@ export default function Board() {
   const unpair = useUnpair();
   const { width, height } = useWindowDimensions();
   const landscape = width >= height;
+  /** Chalk handwriting for the board. */
+  const [fontsLoaded] = useFonts({ Caveat_600SemiBold, Caveat_700Bold });
 
   /** Parent setting (Espace parent → Voix de Silia). Off = text only, and the server sends no audio at all. */
   const [voiceOn, setVoiceOn] = useState(true);
@@ -616,149 +608,176 @@ export default function Board() {
   const statusLabel = !session ? 'En attente de la caméra' : session.status === 'paused' ? 'En pause' : scanning ? 'Je regarde ta page…' : 'Devoirs en cours';
   const statusColor = !session ? colors.muted : session.status === 'paused' || scanning ? colors.accent : colors.success;
   const next = result?.next;
+  /** Handwriting on the chalkboard (Caveat). Arabic text uses the system font: Caveat has no Arabic letters. */
+  const chalk = (text: string | undefined, bold = false) =>
+    text && ARABIC.test(text)
+      ? styles.chalkRtl
+      : fontsLoaded
+        ? { fontFamily: bold ? 'Caveat_700Bold' : 'Caveat_600SemiBold' }
+        : null;
+  // What the chalk column shows: the exercises to choose from, the checked exercise, the active one, or the invitation.
+  const chalkNumber = choices.length ? null : result ? (result.label ?? String(result.exercise_index)) : focus ? exerciseName(focus) : null;
+  const chalkTitle = choices.length
+    ? `Je vois ${choices.length} exercices`
+    : (result?.title ?? focus?.title ?? `Quand tu as fini, appuie sur « ${TUTOR_NAME}, regarde »`);
+  const chalkInstr = choices.length ? 'Lequel on commence ?' : result?.instr;
 
   return (
     <SafeAreaView style={styles.root}>
+      {/* top bar: every button is an icon; the one focused with the remote opens with its label */}
       <View style={styles.header}>
         <Text style={styles.title}>{TUTOR_NAME}</Text>
-        <View style={styles.headerRight}>
-          <Text style={styles.chip}>
-            <Text style={{ color: statusColor }}>● </Text>
-            {statusLabel}
+        <Text style={styles.chip}>
+          <Text style={{ color: statusColor }}>● </Text>
+          {statusLabel}
+        </Text>
+        {/* Only problems are shown (connection lost, voice or photo error); nothing while all is fine. */}
+        {session && link !== 'en direct' && link !== 'connexion…' ? (
+          <Text style={[styles.chip, styles.chipMuted]} numberOfLines={1}>
+            {link}
           </Text>
-          {/* Only problems are shown (connection lost, voice or photo error); nothing while all is fine. */}
-          {session && link !== 'en direct' && link !== 'connexion…' ? (
-            <Text style={[styles.chip, styles.chipMuted]} numberOfLines={1}>
-              {link}
-            </Text>
-          ) : null}
-          {Platform.OS === 'web' ? (
-            <Button label="Plein écran" variant="ghost" onPress={() => (globalThis as any).document?.documentElement?.requestFullscreen?.()} />
-          ) : null}
-          <Button label="Recharger" variant="ghost" onPress={reload} />
-          <Button label="Délier" variant="ghost" onPress={unpair} />
-        </View>
+        ) : null}
+        <View style={{ flex: 1 }} />
+        {(focus || result) && !choices.length ? (
+          <TopButton icon="copy" label="Exercice similaire" onPress={() => help(undefined, 'similar')} disabled={busy || !active} />
+        ) : null}
+        <TopButton icon="speaker" label="Répéter" onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
+        <TopButton
+          icon="eye"
+          label={`${TUTOR_NAME}, regarde`}
+          tone={choices.length ? 'normal' : 'primary'}
+          onPress={lookNow}
+          loading={busy && scanning}
+          disabled={!active}
+        />
+        {choices.length && suggestedChoice ? (
+          <TopButton icon="check" label={`Oui, le ${exerciseName(suggestedChoice)}`} tone="primary" showLabel onPress={() => help(suggestedChoice)} />
+        ) : null}
+        <View style={styles.separator} />
+        {Platform.OS === 'web' ? (
+          <TopButton icon="expand" label="Plein écran" tone="quiet" onPress={() => (globalThis as any).document?.documentElement?.requestFullscreen?.()} />
+        ) : null}
+        <TopButton icon="refresh" label="Recharger" tone="quiet" onPress={reload} />
+        <TopButton icon="unlink" label="Délier" tone="quiet" onPress={unpair} />
       </View>
 
       <View style={[styles.main, { flexDirection: landscape ? 'row' : 'column' }]}>
-        <View style={[styles.wood, { flex: landscape ? 3 : 2 }]}>
-          <View style={styles.chalkboard}>
-            {practice && practiceView ? (
-              <PracticeBoard practice={practice} />
-            ) : photo ? (
-              <>
-                <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={sessionRotation ?? 0} annotations={shown} scanning={scanning} />
-                <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={[styles.rotate, practice ? { top: 64 } : null]}>
-                  <Text style={styles.rotateText}>↻</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Text style={styles.chalkText}>
-                Quand tu as fini, appuie sur{'\n'}« {TUTOR_NAME}, regarde »
-              </Text>
-            )}
-            {practice ? (
-              <View style={styles.boardTabs}>
-                <Pressable accessibilityRole="button" onPress={() => setPracticeView((v) => !v)} style={styles.boardTab}>
-                  <Text style={styles.boardTabText}>{practiceView ? 'Voir la photo' : 'Exercice similaire'}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Fermer l’exercice similaire"
-                  onPress={() => {
-                    setPractice(null);
-                    setPracticeView(true);
-                  }}
-                  style={styles.boardTab}
-                >
-                  <Text style={styles.boardTabText}>Fermer</Text>
-                </Pressable>
+        {/* the board: the exercise in chalk on the left, the photo (or the practice exercise) on the right */}
+        <View style={[styles.wood, landscape ? { flexBasis: '70%', flexGrow: 0, flexShrink: 0 } : { flex: 2 }]}>
+          <View style={[styles.chalkboard, { flexDirection: landscape ? 'row' : 'column' }]}>
+            <View style={[styles.chalkCol, landscape ? { width: '38%' } : null]}>
+              <View style={styles.chalkHead}>
+                {chalkNumber ? <Text style={[styles.chalkNumber, chalk(chalkNumber, true)]}>{chalkNumber}</Text> : null}
+                <Text style={[styles.chalkTitle, chalk(chalkTitle, true)]} numberOfLines={3}>
+                  {chalkTitle}
+                </Text>
               </View>
-            ) : null}
+              {chalkInstr ? (
+                <>
+                  <View style={styles.chalkLine} />
+                  <Text style={[styles.chalkInstr, chalk(chalkInstr)]} numberOfLines={4}>
+                    {chalkInstr}
+                  </Text>
+                </>
+              ) : null}
+
+              {choices.length ? (
+                <View style={styles.chalkList}>
+                  {choices.map((c) => {
+                    const on = c.index === suggestedChoice?.index;
+                    return (
+                      <Pressable
+                        key={c.index}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Exercice ${exerciseName(c)} : ${c.title}`}
+                        onPress={() => help(c)}
+                        style={[styles.chalkChoice, on && styles.chalkChoiceOn]}
+                      >
+                        <Text style={[styles.chalkItem, chalk(c.title, true), on && { color: '#7FD3FF' }]} numberOfLines={1}>
+                          {exerciseName(c)} · {c.title}
+                        </Text>
+                        <Text style={[styles.chalkSmall, chalk(CHOICE_STATUS[c.status])]}>{CHOICE_STATUS[c.status]}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : result ? (
+                <View style={styles.chalkList}>
+                  {result.lines.slice(0, 7).map((l, i) => (
+                    <View key={i} style={styles.chalkRow}>
+                      <Text style={[styles.chalkMark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
+                      <Text
+                        style={[styles.chalkItem, chalk(l.q), l.status === 'wrong' && { color: WRONG_CHALK }, l.status === 'empty' && { opacity: 0.6 }]}
+                        numberOfLines={2}
+                      >
+                        {lineText(l)}
+                      </Text>
+                    </View>
+                  ))}
+                  {next ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => help({ index: next.index, title: next.title, status: 'empty', label: next.label }, 'correct')}
+                      style={styles.chalkPill}
+                    >
+                      <Text style={[styles.chalkItem, chalk('Exercice', true)]}>Exercice {next.label ?? next.index} →</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <View style={{ flex: 1 }} />
+              {focus && !choices.length ? (
+                <View style={styles.chalkActions}>
+                  {(['explain', 'solve'] as const).map((a) => (
+                    <Pressable key={a} accessibilityRole="button" disabled={busy} onPress={() => help(undefined, a)} style={[styles.chalkPill, focus.action === a && styles.chalkPillOn]}>
+                      <Text style={[styles.chalkSmall, chalk(ACTION_LABEL[a], true)]}>{ACTION_LABEL[a]}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable accessibilityRole="button" accessibilityLabel="Changer d’exercice" onPress={() => help(undefined, 'choose')} style={styles.chalkPill}>
+                    <Text style={[styles.chalkSmall, chalk('Changer', true)]}>Changer</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {/* chalk on the ledge */}
+              <View style={styles.chalkStick} />
+            </View>
+
+            <View style={styles.photoArea}>
+              {practice && practiceView ? (
+                <PracticeBoard practice={practice} />
+              ) : photo ? (
+                <>
+                  <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={sessionRotation ?? 0} annotations={shown} scanning={scanning} />
+                  <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={[styles.rotate, practice ? { top: 56 } : null]}>
+                    <Text style={styles.rotateText}>↻</Text>
+                  </Pressable>
+                </>
+              ) : null}
+              {practice ? (
+                <View style={styles.boardTabs}>
+                  <Pressable accessibilityRole="button" onPress={() => setPracticeView((v) => !v)} style={styles.boardTab}>
+                    <Text style={styles.boardTabText}>{practiceView ? 'Voir la photo' : 'Exercice similaire'}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Fermer l’exercice similaire"
+                    onPress={() => {
+                      setPractice(null);
+                      setPracticeView(true);
+                    }}
+                    style={styles.boardTab}
+                  >
+                    <Text style={styles.boardTabText}>Fermer</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
           </View>
         </View>
 
-        <View style={[styles.side, { flex: landscape ? 2 : 1 }]}>
-          <View style={styles.bubble}>
-            <Text style={[styles.bubbleText, rtl && styles.rtlText]}>{bubble}</Text>
-          </View>
-
-          {choices.length ? (
-            <View style={styles.list}>
-              {choices.map((c) => {
-                const on = c.index === suggestedChoice?.index;
-                return (
-                  <Pressable
-                    key={c.index}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Exercice ${exerciseName(c)} : ${c.title}`}
-                    onPress={() => help(c)}
-                    style={({ pressed }) => [styles.choice, on && styles.choiceOn, pressed && { opacity: 0.8 }]}
-                  >
-                    <Text style={[styles.number, on && styles.numberOn]}>{exerciseName(c)}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.choiceTitle} numberOfLines={1}>
-                        {c.title}
-                      </Text>
-                      <Text style={styles.choiceStatus}>{CHOICE_STATUS[c.status]}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : result ? (
-            <View style={styles.card}>
-              <Text style={styles.cardCaption} numberOfLines={1}>
-                Exercice {result.label ?? result.exercise_index} · {result.title}
-              </Text>
-              {result.lines.slice(0, 6).map((l, i) => (
-                <View key={i} style={[styles.line, l.status === 'wrong' && styles.lineWrong]}>
-                  <View style={[styles.dot, { backgroundColor: LINE_COLOR[l.status] }, l.status === 'empty' && styles.dotEmpty]} />
-                  <Text
-                    style={[styles.lineText, l.status === 'empty' && { color: colors.muted }, l.status === 'wrong' && { color: WRONG_RED }]}
-                    numberOfLines={1}
-                  >
-                    {lineText(l)}
-                  </Text>
-                </View>
-              ))}
-              {next ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => help({ index: next.index, title: next.title, status: 'empty', label: next.label }, 'correct')}
-                  style={styles.pill}
-                >
-                  <Text style={styles.pillText}>Exercice {next.label ?? next.index} →</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : focus ? (
-            <View style={[styles.card, styles.focusCard]}>
-              <View style={styles.line}>
-                <Text style={styles.number}>{exerciseName(focus)}</Text>
-                <Text style={styles.choiceTitle} numberOfLines={1}>
-                  {focus.title}
-                </Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Changer d’exercice" onPress={() => help(undefined, 'choose')} style={styles.pill}>
-                  <Text style={styles.pillText}>Changer</Text>
-                </Pressable>
-              </View>
-              <View style={styles.actions}>
-                {(['explain', 'solve'] as const).map((a) => (
-                  <Pressable
-                    key={a}
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={() => help(undefined, a)}
-                    style={[styles.pill, focus.action === a && styles.pillOn]}
-                  >
-                    <Text style={styles.pillText}>{ACTION_LABEL[a]}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
+        {/* right: the answer field, then Silia with her speech bubble */}
+        <View style={[styles.side, { flex: 1 }]}>
           {session && (focus || guide) && !choices.length ? (
             <View style={[styles.answer, guide && styles.answerGuide]}>
               {guide ? <Text style={styles.cardCaption}>Ta réponse</Text> : null}
@@ -788,26 +807,17 @@ export default function Board() {
           ) : null}
 
           <View style={styles.avatarBox}>
-            <Avatar mood={mood} reaction={reaction} language={bubbleLang} />
+            {/* what Silia says: a speech bubble coming out of her */}
+            <View style={styles.bubble}>
+              <Text style={[styles.bubbleText, rtl && styles.rtlText]}>{bubble}</Text>
+              <View style={styles.bubbleTail} />
+            </View>
+            <View style={styles.avatarFit}>
+              <Avatar mood={mood} reaction={reaction} language={bubbleLang} />
+            </View>
             <Text style={styles.nameTag}>{TUTOR_NAME}</Text>
           </View>
         </View>
-      </View>
-
-      <View style={styles.footer}>
-        {/* Always there once an exercise is known (checked, or active). */}
-        {(focus || result) && !choices.length ? (
-          <Button label="Exercice similaire" variant="secondary" onPress={() => help(undefined, 'similar')} disabled={busy || !active} />
-        ) : null}
-        <Button label="Répéter" variant="secondary" onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
-        {choices.length ? (
-          <>
-            <Button label={`${TUTOR_NAME}, regarde`} variant="secondary" onPress={lookNow} disabled={!active} />
-            {suggestedChoice ? <Button label={`Oui, le ${exerciseName(suggestedChoice)}`} onPress={() => help(suggestedChoice)} /> : null}
-          </>
-        ) : (
-          <Button label={`${TUTOR_NAME}, regarde`} onPress={lookNow} loading={busy && scanning} disabled={!active} />
-        )}
       </View>
 
       {!started ? (
@@ -822,29 +832,65 @@ export default function Board() {
   );
 }
 
+const CHALK = '#F4F1E8';
+const WRONG_CHALK = '#FF7A7A';
+const ARABIC = /[؀-ۿ]/;
+const MARK: Record<ResultLine['status'], string> = { right: '✓', wrong: '✗', unsure: '?', open: '?', empty: '·' };
+const MARK_COLOR: Record<ResultLine['status'], string> = { right: colors.success, wrong: WRONG_CHALK, unsure: '#7FD3FF', open: '#7FD3FF', empty: CHALK };
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg, padding: space.md, gap: space.md, overflow: 'hidden' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md, minWidth: 0 },
-  headerRight: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 1 },
-  title: { color: colors.text, fontSize: 26, fontWeight: '900' },
+  root: { flex: 1, backgroundColor: colors.bg, padding: space.md, paddingTop: space.sm, gap: space.sm, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minWidth: 0, minHeight: 56 },
+  title: { color: colors.text, fontSize: 26, fontWeight: '900', marginRight: space.xs },
   chip: {
     color: colors.text,
     backgroundColor: colors.surface,
     paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    paddingVertical: 7,
     borderRadius: radius.pill,
     fontWeight: '800',
+    fontSize: 14,
     overflow: 'hidden',
   },
   chipMuted: { color: colors.muted, maxWidth: 260 },
+  separator: { width: 2, height: 30, backgroundColor: colors.surface, marginHorizontal: space.xs },
   main: { flex: 1, gap: space.md, minHeight: 0, minWidth: 0 },
   wood: { backgroundColor: '#A06A3F', borderRadius: radius.lg, padding: 12, minHeight: 0, minWidth: 0 },
-  chalkboard: { flex: 1, backgroundColor: '#1F4A3D', borderRadius: 14, padding: space.md, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  chalkText: { color: '#F4F1E8', fontSize: 32, fontWeight: '700', textAlign: 'center', lineHeight: 44 },
+  chalkboard: { flex: 1, backgroundColor: '#1F4A3D', borderRadius: 14, padding: space.md, paddingLeft: space.lg, gap: space.md, overflow: 'hidden' },
+  chalkCol: { gap: 8, minHeight: 0 },
+  chalkHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  chalkNumber: {
+    minWidth: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: '#7FD3FF',
+    color: '#7FD3FF',
+    fontSize: 26,
+    textAlign: 'center',
+    lineHeight: 36,
+    paddingHorizontal: 4,
+  },
+  chalkTitle: { color: CHALK, fontSize: 38, lineHeight: 40, flexShrink: 1 },
+  chalkLine: { height: 3, width: '70%', backgroundColor: 'rgba(244,241,232,0.5)', borderRadius: 2, transform: [{ rotate: '-1deg' }] },
+  chalkInstr: { color: CHALK, fontSize: 30, lineHeight: 34 },
+  chalkList: { gap: 4, marginTop: 6, paddingTop: 8, borderTopWidth: 2, borderTopColor: 'rgba(244,241,232,0.3)' },
+  chalkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  chalkMark: { width: 22, fontSize: 24, fontWeight: '900', lineHeight: 30 },
+  chalkItem: { color: CHALK, fontSize: 26, lineHeight: 30, flexShrink: 1 },
+  chalkSmall: { color: 'rgba(244,241,232,0.8)', fontSize: 20, lineHeight: 24 },
+  chalkChoice: { paddingVertical: 4, paddingHorizontal: 8, marginHorizontal: -8, borderRadius: 10, borderWidth: 2, borderColor: 'transparent' },
+  chalkChoiceOn: { borderColor: '#7FD3FF', borderStyle: 'dashed' },
+  chalkActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chalkPill: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 14, borderWidth: 2, borderColor: 'rgba(244,241,232,0.6)' },
+  chalkPillOn: { borderColor: '#7FD3FF' },
+  chalkStick: { width: 56, height: 10, backgroundColor: CHALK, opacity: 0.85, borderRadius: 3, transform: [{ rotate: '-8deg' }] },
+  chalkRtl: { writingDirection: 'rtl', textAlign: 'right', fontFamily: undefined },
+  photoArea: { flex: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center' },
   rotate: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    top: 0,
+    right: 0,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -853,84 +899,67 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rotateText: { color: '#FFFFFF', fontSize: 24, fontWeight: '900' },
-  boardTabs: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', gap: 8 },
+  boardTabs: { position: 'absolute', top: 0, right: 0, flexDirection: 'row', gap: 8 },
   boardTab: { backgroundColor: 'rgba(27,35,64,0.8)', borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.sm },
   boardTabText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
   side: { gap: space.md, minHeight: 0, minWidth: 0 },
-  bubble: { backgroundColor: '#FFFFFF', borderRadius: 28, padding: space.lg, alignSelf: 'stretch' },
-  bubbleText: { color: colors.bg, fontSize: 24, fontWeight: '800', lineHeight: 32 },
-  rtlText: { writingDirection: 'rtl', textAlign: 'right', fontSize: 28, lineHeight: 42 },
-  list: { gap: space.sm },
-  choice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    borderWidth: 3,
-    borderColor: 'transparent',
-    paddingHorizontal: space.md,
-    paddingVertical: 10,
-  },
-  choiceOn: { borderColor: colors.accent },
-  number: {
-    minWidth: 38,
-    height: 38,
-    borderRadius: 19,
-    overflow: 'hidden',
-    backgroundColor: colors.bg,
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: '900',
-    textAlign: 'center',
-    lineHeight: 38,
-    paddingHorizontal: 4,
-  },
-  numberOn: { backgroundColor: '#7FD3FF', color: colors.bg },
-  choiceTitle: { color: colors.text, fontSize: 19, fontWeight: '900', flexShrink: 1, flexGrow: 1 },
-  choiceStatus: { color: colors.muted, fontSize: 14, fontWeight: '700' },
-  card: { backgroundColor: colors.surface, borderRadius: 20, padding: space.md, gap: space.sm },
-  focusCard: { borderWidth: 3, borderColor: '#7FD3FF' },
   cardCaption: { color: colors.muted, fontSize: 15, fontWeight: '800' },
-  line: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  dot: { width: 14, height: 14, borderRadius: 7 },
-  lineWrong: { backgroundColor: 'rgba(255,90,90,0.14)', borderRadius: 10, marginHorizontal: -8, paddingHorizontal: 8, paddingVertical: 4 },
-  dotEmpty: { borderWidth: 2, borderColor: colors.muted },
-  lineText: { color: colors.text, fontSize: 18, fontWeight: '800', flexShrink: 1 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  pill: { alignSelf: 'flex-start', paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },
-  pillOn: { backgroundColor: '#7FD3FF33', borderWidth: 2, borderColor: '#7FD3FF' },
-  pillText: { color: colors.text, fontWeight: '800', fontSize: 15 },
   answer: { gap: space.sm },
   answerGuide: { backgroundColor: colors.surface, borderRadius: 22, padding: space.md },
   answerRow: { flexDirection: 'row', gap: space.sm, alignItems: 'center' },
   answerInput: {
     flex: 1,
-    minHeight: 52,
+    minWidth: 0,
+    minHeight: 48,
     backgroundColor: colors.surface,
     color: colors.text,
-    borderRadius: 16,
-    paddingHorizontal: space.lg,
-    fontSize: 22,
+    borderRadius: 14,
+    paddingHorizontal: space.md,
+    fontSize: 20,
     fontWeight: '800',
   },
-  answerInputGuide: { backgroundColor: '#FFFFFF', color: colors.bg, borderWidth: 3, borderColor: colors.accent, fontSize: 30, fontWeight: '900' },
-  answerSend: { backgroundColor: colors.accent, borderRadius: 16, paddingHorizontal: space.lg, minHeight: 52, justifyContent: 'center' },
-  answerSendText: { color: colors.onAccent, fontSize: 18, fontWeight: '900' },
+  answerInputGuide: { backgroundColor: '#FFFFFF', color: colors.bg, borderWidth: 3, borderColor: colors.accent, fontSize: 28, fontWeight: '900' },
+  answerSend: { backgroundColor: colors.accent, borderRadius: 14, paddingHorizontal: space.md, minHeight: 48, justifyContent: 'center' },
+  answerSendText: { color: colors.onAccent, fontSize: 17, fontWeight: '900' },
   hint: { color: colors.muted, fontSize: 15, fontWeight: '700' },
-  avatarBox: { flex: 1, minHeight: 120, alignItems: 'center', justifyContent: 'flex-end', gap: space.xs },
+  // Takes the space left under the answer field: the bubble on top, Silia below; she shrinks, never covers them.
+  avatarBox: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'flex-end', gap: space.xs, overflow: 'hidden' },
+  bubble: {
+    alignSelf: 'stretch',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: 18,
+  },
+  bubbleTail: {
+    position: 'absolute',
+    bottom: -18,
+    left: '50%',
+    marginLeft: -16,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 16,
+    borderRightWidth: 16,
+    borderTopWidth: 20,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#FFFFFF',
+  },
+  bubbleText: { color: colors.bg, fontSize: 22, fontWeight: '800', lineHeight: 29 },
+  rtlText: { writingDirection: 'rtl', textAlign: 'right', fontSize: 26, lineHeight: 40 },
+  avatarFit: { flex: 1, minHeight: 0, width: '100%', alignItems: 'center', justifyContent: 'flex-end' },
   nameTag: {
     color: colors.text,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '900',
     letterSpacing: 2,
     backgroundColor: colors.surface,
     paddingHorizontal: space.lg,
-    paddingVertical: space.xs,
+    paddingVertical: 2,
     borderRadius: radius.pill,
     overflow: 'hidden',
   },
-  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, flexWrap: 'wrap' },
   startOverlay: {
     position: 'absolute',
     top: 0,

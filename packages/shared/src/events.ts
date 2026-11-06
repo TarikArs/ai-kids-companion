@@ -123,6 +123,8 @@ export interface SessionEvents {
     snapshot_id?: string;
     exercise_index: number;
     title: string;
+    /** Printed instruction (written in chalk on the Board). */
+    instr?: string;
     label?: string;
     mode: 'verdict' | 'guide' | 'start';
     lines: ResultLine[];

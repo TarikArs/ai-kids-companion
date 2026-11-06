@@ -2,7 +2,7 @@ import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 // Simple stroke icons (24x24) drawn with react-native-svg: no extra package.
 
-export type IconName = 'mic' | 'stop' | 'pause' | 'play' | 'flag' | 'unlink' | 'info' | 'home' | 'keyboard' | 'send' | 'eye';
+export type IconName = 'mic' | 'stop' | 'pause' | 'play' | 'flag' | 'unlink' | 'info' | 'home' | 'keyboard' | 'send' | 'eye' | 'copy' | 'speaker' | 'expand' | 'refresh' | 'check';
 
 export function Icon({ name, size = 28, color = '#FFFFFF' }: { name: IconName; size?: number; color?: string }) {
   const p = { stroke: color, strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
@@ -59,6 +59,26 @@ export function Icon({ name, size = 28, color = '#FFFFFF' }: { name: IconName; s
           <Circle cx={12} cy={12} r={3.5} {...p} />
         </>
       ) : null}
+      {name === 'copy' ? (
+        <>
+          <Rect x={3} y={7} width={12} height={14} rx={2} {...p} />
+          <Path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" {...p} />
+        </>
+      ) : null}
+      {name === 'speaker' ? (
+        <>
+          <Path d="M4 10v4h4l5 4V6L8 10z" {...p} />
+          <Path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" {...p} />
+        </>
+      ) : null}
+      {name === 'expand' ? <Path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" {...p} /> : null}
+      {name === 'refresh' ? (
+        <>
+          <Path d="M20 11a8 8 0 1 0-2.3 5.7" {...p} />
+          <Path d="M20 4v7h-7" {...p} />
+        </>
+      ) : null}
+      {name === 'check' ? <Path d="M4 12.5l5 5L20 6.5" {...p} strokeWidth={2.6} /> : null}
       {name === 'home' ? (
         <>
           <Path d="M3 11l9-8 9 8" {...p} />

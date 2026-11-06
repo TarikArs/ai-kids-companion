@@ -21,7 +21,8 @@ const POINTER_FOCUS_MS = 800;
 if (Platform.OS === 'web' && typeof globalThis.addEventListener === 'function') {
   globalThis.addEventListener('pointerdown', () => (lastPointerAt = Date.now()), true);
 }
-const fromPointer = () => Date.now() - lastPointerAt < POINTER_FOCUS_MS;
+/** The focus that just happened came from a touch or a click (not the TV remote or the keyboard). */
+export const fromPointer = () => Date.now() - lastPointerAt < POINTER_FOCUS_MS;
 
 /**
  * Pressable that works with a TV remote (D-pad) and a keyboard: it can take focus, shows a clear yellow ring

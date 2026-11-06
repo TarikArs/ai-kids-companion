@@ -6,7 +6,7 @@ import { checkCopy, copyModel } from './copy.ts';
 import { broadcast, type Turn } from './broadcast.ts';
 import { FOCUS_TEXT, isArabic, LANGUAGE_NAME, PHRASES, SPEAKING_STYLE, tutorLang, VERDICT_TEXT, type Lang } from './language.ts';
 import { HELP_ACTIONS, type Decision, type FocusState, type HelpAction, type Intent, type Practice } from './intent.ts';
-import { downloadB64, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
+import { downloadB64, pageText, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
 import { admin } from './supabase.ts';
 import { speechUrl } from './tts.ts';
 import { checkOpen, confirm, guideQuestion, hintFor, judge, practiceLines, type Line, type LineStatus } from './verdict.ts';
@@ -306,9 +306,10 @@ ${languageRule(c)}`;
  */
 async function runVerdict(c: HelpCtx, e: PageExercise): Promise<Spoken> {
   const lang = languageFor(c);
-  const lines = await confirm(await checkOpen(e, judge(e), lang, c.grade), photoOf(c), c.grade, c.log);
+  const text = c.snap ? () => pageText(c.snap!, (p) => p) : undefined;
+  const lines = await confirm(await checkOpen(e, judge(e), lang, c.grade, text), photoOf(c), c.grade, c.log);
   const next = c.page!.exercises.filter((x) => x.n > e.n).sort((a, b) => a.n - b.n)[0];
-  return await speakLines(c, lines, { index: e.n, title: e.title, label: e.label, frame: frame(e), next, guideFor: e });
+  return await speakLines(c, lines, { index: e.n, title: e.title, instr: e.instr, label: e.label, frame: frame(e), next, guideFor: e });
 }
 
 type Spoken = { text: string; language: Lang; kind: Kind; annotations: unknown[] };
@@ -335,6 +336,7 @@ export async function checkPractice(c: HelpCtx): Promise<Outcome | null> {
   const v = await speakLines(c, lines, {
     index: c.focus!.index,
     title: `Exercice similaire · ${practice.title}`,
+    instr: practice.instr,
     practice: true,
     done: allRight ? VERDICT_TEXT[lang].practiceDone : undefined,
   });
@@ -352,7 +354,7 @@ export async function checkPractice(c: HelpCtx): Promise<Outcome | null> {
 async function speakLines(
   c: HelpCtx,
   lines: Line[],
-  meta: { index: number; title: string; label?: string; frame?: unknown[]; next?: PageExercise; guideFor?: PageExercise; practice?: boolean; done?: string },
+  meta: { index: number; title: string; instr?: string; label?: string; frame?: unknown[]; next?: PageExercise; guideFor?: PageExercise; practice?: boolean; done?: string },
 ): Promise<Spoken> {
   const lang = languageFor(c);
   const V = VERDICT_TEXT[lang];
@@ -396,6 +398,7 @@ async function speakLines(
     ...(c.snap ? { snapshot_id: c.snap.id } : {}),
     exercise_index: meta.index,
     title: meta.title,
+    ...(meta.instr ? { instr: meta.instr } : {}),
     ...(meta.label ? { label: meta.label } : {}),
     mode,
     lines: lines.map((l) => ({ q: itemLabel(l.q), a: l.a, status: l.status })),

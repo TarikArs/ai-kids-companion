@@ -126,20 +126,45 @@ export async function confirm(lines: Line[], photo: () => Promise<string>, grade
  * text-only call against the item, only when her handwriting was read with confidence. The model also gives the right
  * answer (never said, used to keep the hint from leaking it) and one hint for a wrong answer.
  */
-export async function checkOpen(e: PageExercise, lines: Line[], language: Lang, grade: string): Promise<Line[]> {
+const ABOUT_TEXT = /\b(vrai|faux|texte|histoire|récit|narrateur|true|false|text|story)\b|صحيح|خطأ|النص|القصة/i;
+
+export async function checkOpen(
+  e: PageExercise,
+  lines: Line[],
+  language: Lang,
+  grade: string,
+  /** Printed text of the page (the story), read only when an item needs it: Vrai/Faux, a word's meaning in the text… */
+  pageText?: () => Promise<string>,
+): Promise<Line[]> {
   for (const l of lines) if (l.status === 'open' && l.a && l.c < THRESHOLD) l.status = 'unsure';
   const todo = lines.filter((l) => l.status === 'open' && l.a);
   if (!todo.length) return lines;
+  // Questions about a text (Vrai/Faux, « dans le texte »…): start reading the page text now, in parallel.
+  const aboutText = ABOUT_TEXT.test(`${e.title} ${e.instr} ${todo.map((l) => l.q).join(' ')}`);
+  let textPromise = aboutText && pageText ? pageText().catch(() => '') : null;
+  // Fast pass without the text (conjugation, spelling, vocabulary)…
+  await judgeOpen(e, todo, language, grade, '');
+  // …then the items that need the story, with the printed text of the page (read once per page, then cached).
+  const needText = todo.filter((l) => l.status === 'open');
+  if (needText.length && pageText) {
+    textPromise ??= pageText().catch(() => '');
+    const text = await textPromise;
+    if (text.trim()) await judgeOpen(e, needText, language, grade, text);
+  }
+  return lines;
+}
+
+async function judgeOpen(e: PageExercise, todo: Line[], language: Lang, grade: string, text: string): Promise<void> {
   const out = await ask(
     `You are checking the homework of a child in ${grade}. Exercise "${e.title}". Instruction: "${e.instr || '(none printed)'}".
-Items and what she wrote (her handwriting, already read):
-${todo.map((l, i) => `${i}. ${l.q}  ->  she wrote: "${l.a}"`).join('\n')}
-For each item: x = the right answer for this item at her level; ok = true if what she wrote is exactly right (spelling and
-endings count), false if it is wrong, null if the item cannot be judged without the picture or is really ambiguous.
+${text ? `Printed text of the page (the story or document the questions are about):\n"""${text.slice(0, 4000)}"""\n` : ''}Items and what she answered (already read; for a table of boxes to tick, her answer is the column she ticked):
+${todo.map((l, i) => `${i}. ${l.q}  ->  she answered: "${l.a}"`).join('\n')}
+For each item: x = the right answer for this item at her level; ok = true if her answer is right (spelling and endings count
+for written words), false if it is wrong, null if ${text ? 'the text really does not allow to decide' : 'it cannot be judged without the text of the page or the picture, or is really ambiguous'}.
 When ok is false: h = ONE short kind hint in ${SPEAKING_STYLE[language]} (max 16 words) that names the item and helps her
-find the mistake herself (the rule, the ending, the helper verb…). Never give the answer in h.
+find the mistake herself (${text ? 'where to look in the text, ' : ''}the rule, the ending…). Never give the answer in h.
 Return JSON only: {"r":[{"i":0,"ok":true,"x":"...","h":""}]}`,
-    700,
+    text ? 1200 : 700,
     'low',
     true,
   );
@@ -147,7 +172,7 @@ Return JSON only: {"r":[{"i":0,"ok":true,"x":"...","h":""}]}`,
   try {
     parsed = JSON.parse(out ?? '{}');
   } catch {
-    return lines;
+    return;
   }
   for (const r of parsed.r ?? []) {
     const l = typeof r.i === 'number' ? todo[r.i] : undefined;
@@ -156,7 +181,6 @@ Return JSON only: {"r":[{"i":0,"ok":true,"x":"...","h":""}]}`,
     if (r.x) l.expected = String(r.x).slice(0, 80);
     if (!r.ok && r.h) l.hn = String(r.h).slice(0, 200);
   }
-  return lines;
 }
 
 /** « 1 - Cheval. » and « cheval » are the same word answer (case, numbering, end punctuation ignored; accents count). */

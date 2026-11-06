@@ -16,7 +16,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
@@ -135,6 +135,28 @@ export default function Camera() {
   const recState = useAudioRecorderState(recorder, 250);
 
   const [ready, setReady] = useState(false);
+  /** Camera zoom, 0 (none) to 1 (max). The photo is taken with the same zoom as the preview, so the guide still fits. */
+  const [zoom, setZoom] = useState(0);
+  const zoomRef = useRef(0);
+  zoomRef.current = zoom;
+  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  const setZoomSafe = (z: number) => setZoom(Math.round(Math.min(1, Math.max(0, z)) * 100) / 100);
+  /** Two fingers apart = zoom in, together = zoom out. */
+  const pinch = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (e) => e.nativeEvent.touches.length === 2,
+      onMoveShouldSetPanResponder: (e) => e.nativeEvent.touches.length === 2,
+      onPanResponderMove: (e) => {
+        const t = e.nativeEvent.touches;
+        if (t.length !== 2) return;
+        const dist = Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY);
+        if (!pinchRef.current) pinchRef.current = { dist, zoom: zoomRef.current };
+        setZoomSafe(pinchRef.current.zoom + (dist / pinchRef.current.dist - 1) * 0.4);
+      },
+      onPanResponderRelease: () => (pinchRef.current = null),
+      onPanResponderTerminate: () => (pinchRef.current = null),
+    }),
+  ).current;
   /** Screen size of the camera view: maps the page guide onto the photo. */
   const screenRef = useRef({ w: 0, h: 0 });
   const [session, setSession] = useState<HomeworkSession | null>(null);
@@ -444,7 +466,8 @@ export default function Camera() {
         screenRef.current = { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height };
       }}
     >
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" animateShutter={false} onCameraReady={() => setReady(true)} />
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" zoom={zoom} animateShutter={false} onCameraReady={() => setReady(true)} />
+      <View style={StyleSheet.absoluteFill} {...pinch.panHandlers} />
       {/* Guide: the whole page must be inside. */}
       {session && !looking ? <View style={styles.guide} pointerEvents="none" /> : null}
       {looking ? (
@@ -521,6 +544,19 @@ export default function Camera() {
                     </Pressable>
                   ))}
                 </ScrollView>
+              ) : null}
+              {session ? (
+                <View style={styles.zoomRow}>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Zoom arrière" onPress={() => setZoomSafe(zoom - 0.05)} disabled={zoom <= 0} style={[styles.zoomBtn, zoom <= 0 && { opacity: 0.4 }]}>
+                    <Text style={styles.zoomText}>−</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Sans zoom" onPress={() => setZoomSafe(0)} style={styles.zoomLevel}>
+                    <Text style={styles.zoomLevelText}>{zoom > 0 ? `Zoom ${Math.round(zoom * 100)} %` : 'Zoom'}</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Zoom avant" onPress={() => setZoomSafe(zoom + 0.05)} disabled={zoom >= 1} style={[styles.zoomBtn, zoom >= 1 && { opacity: 0.4 }]}>
+                    <Text style={styles.zoomText}>+</Text>
+                  </Pressable>
+                </View>
               ) : null}
               {session && typing ? (
                 <View style={styles.typeRow}>
@@ -684,5 +720,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
   },
+  zoomRow: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: space.sm },
+  zoomBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(27,35,64,0.88)', alignItems: 'center', justifyContent: 'center' },
+  zoomText: { color: colors.text, fontSize: 26, fontWeight: '900', lineHeight: 30 },
+  zoomLevel: { height: 36, paddingHorizontal: space.md, borderRadius: radius.pill, backgroundColor: 'rgba(27,35,64,0.88)', justifyContent: 'center' },
+  zoomLevelText: { color: colors.text, fontSize: 14, fontWeight: '800' },
   mainRow: { flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'flex-end', paddingBottom: space.sm },
 });
