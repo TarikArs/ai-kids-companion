@@ -5,16 +5,20 @@ import { StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { RoleArt } from '@/components/illustrations';
-import { Screen } from '@/components/ui';
-import { useAppStore } from '@/lib/store';
-import { colors, radius, space } from '@/lib/theme';
-import { TUTOR_NAME } from '@/lib/tutor';
+import { PaperCard, Polaroid } from '@/components/paper';
+import { Screen, Title } from '@/components/ui';
+import { Avatar } from '@/features/board/avatar';
 import { APP_LANGS, t } from '@/lib/i18n';
+import { font, hardShadow, paper } from '@/lib/paper-theme';
+import { useAppStore } from '@/lib/store';
+import { space } from '@/lib/theme';
+import { TUTOR_NAME } from '@/lib/tutor';
 
-const ROLES: { role: AppRole; title: string; text: string }[] = [
-  { role: 'board', title: 'Tableau', text: 'TV ou tablette. {name} parle et montre le cahier.' },
-  { role: 'camera', title: 'Caméra', text: 'Téléphone posé au-dessus du cahier.' },
-  { role: 'parent', title: 'Parent', text: 'Relier les appareils, régler la langue et le niveau.' },
+/** Each role is a sticky note of its own colour, slightly turned, as if stuck on the page by hand. */
+const ROLES: { role: AppRole; title: string; text: string; color: string; tilt: number }[] = [
+  { role: 'board', title: 'Tableau', text: 'TV ou tablette. {name} parle et montre le cahier.', color: paper.stickyBlue, tilt: -1.2 },
+  { role: 'camera', title: 'Caméra', text: 'Téléphone posé au-dessus du cahier.', color: paper.stickyYellow, tilt: 1 },
+  { role: 'parent', title: 'Parent', text: 'Relier les appareils, régler la langue et le niveau.', color: paper.stickyPink, tilt: -0.6 },
 ];
 
 export default function Home() {
@@ -31,12 +35,18 @@ export default function Home() {
   }
 
   return (
-    <Screen center>
+    <Screen>
       <View style={styles.header}>
-        <Text style={styles.brand}>{TUTOR_NAME}</Text>
-        <Text style={styles.question}>{t('Cet appareil sera…')}</Text>
+        <Polaroid caption={TUTOR_NAME} width={128} tilt={-4}>
+          <Avatar mood="idle" />
+        </Polaroid>
+        <View style={{ flex: 1, gap: space.xs }}>
+          <Title>{t('Cet appareil sera…')}</Title>
+          <Text style={styles.note}>{t('Tu pourras changer plus tard.')}</Text>
+        </View>
       </View>
-      <View style={{ gap: space.md }}>
+
+      <View style={{ gap: space.lg }}>
         {ROLES.map((r, i) => (
           <Pressable
             key={r.role}
@@ -44,60 +54,65 @@ export default function Home() {
             accessibilityRole="button"
             accessibilityLabel={`${t(r.title)}. ${t(r.text, { name: TUTOR_NAME })}`}
             onPress={() => setRole(r.role)}
-            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+            style={({ pressed }) => [pressed && { transform: [{ translateX: 3 }, { translateY: 3 }] }]}
           >
-            <View style={styles.art}>
-              <RoleArt name={r.role} size={92} />
-            </View>
-            <View style={styles.texts}>
-              <Text style={styles.cardTitle}>{t(r.title)}</Text>
-              <Text style={styles.cardText}>{t(r.text, { name: TUTOR_NAME })}</Text>
-            </View>
-            <Text style={styles.chevron}>›</Text>
+            <PaperCard kind="sticky" color={r.color} tilt={r.tilt} tape={i === 1} pad={12} style={styles.card}>
+              {/* the drawing hangs in a little wooden chalkboard frame */}
+              <View style={styles.frame}>
+                <RoleArt name={r.role} size={80} />
+              </View>
+              <View style={styles.texts}>
+                <Text style={styles.cardTitle}>{t(r.title)}</Text>
+                <Text style={styles.cardText}>{t(r.text, { name: TUTOR_NAME })}</Text>
+              </View>
+              <Text style={styles.arrow}>➜</Text>
+            </PaperCard>
           </Pressable>
         ))}
       </View>
-      <Text style={styles.footnote}>{t('Tu pourras changer plus tard.')}</Text>
+
       {/* App language: every device passes here first (the Board and the Camera have no settings screen). */}
       <View style={styles.langs}>
-        {APP_LANGS.map((l) => (
-          <Pressable
-            key={l.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected: appLangSetting === l.value }}
-            onPress={() => setAppLang(l.value)}
-            style={[styles.lang, appLangSetting === l.value && styles.langOn]}
-          >
-            <Text style={[styles.langText, appLangSetting === l.value && styles.langTextOn]}>{l.value === 'system' ? t(l.label) : l.label}</Text>
-          </Pressable>
-        ))}
+        {APP_LANGS.map((l) => {
+          const on = appLangSetting === l.value;
+          return (
+            <Pressable
+              key={l.value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              onPress={() => setAppLang(l.value)}
+              style={[styles.lang, on ? styles.langOn : null]}
+            >
+              <Text style={[styles.langText, on && font.bold]}>{l.value === 'system' ? t(l.label) : l.label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { alignItems: 'center', gap: space.xs, marginBottom: space.sm },
-  brand: { color: colors.accent, fontSize: 18, fontWeight: '900', letterSpacing: 3, textTransform: 'uppercase' },
-  question: { color: colors.text, fontSize: 30, fontWeight: '900', textAlign: 'center' },
-  card: {
-    flexDirection: 'row',
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.sm, marginBottom: space.sm },
+  note: { ...font.hand, color: paper.blueInk, fontSize: 22 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  frame: {
+    width: 96,
+    height: 76,
+    borderRadius: 6,
+    borderWidth: 5,
+    borderColor: paper.wood,
+    backgroundColor: paper.chalkboard,
     alignItems: 'center',
-    gap: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: space.md,
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
-  art: { width: 100, height: 80, borderRadius: radius.md, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   texts: { flex: 1, gap: 2 },
-  cardTitle: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  cardText: { color: colors.muted, fontSize: 15, lineHeight: 20 },
-  chevron: { color: colors.muted, fontSize: 32, fontWeight: '300' },
-  footnote: { color: colors.muted, fontSize: 14, textAlign: 'center' },
-  langs: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.xs },
-  lang: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 2, borderColor: colors.surface },
-  langOn: { borderColor: colors.accent, backgroundColor: colors.surface },
-  langText: { color: colors.muted, fontSize: 14, fontWeight: '800' },
-  langTextOn: { color: colors.text },
+  cardTitle: { ...font.bold, color: paper.ink, fontSize: 24 },
+  cardText: { ...font.medium, color: paper.inkSoft, fontSize: 15, lineHeight: 20 },
+  arrow: { ...font.bold, color: paper.ink, fontSize: 22 },
+  langs: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.sm, marginTop: space.sm },
+  lang: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 2, borderColor: paper.ink, backgroundColor: paper.card, ...hardShadow(2) },
+  langOn: { backgroundColor: paper.yellow, ...hardShadow(3) },
+  langText: { ...font.medium, color: paper.ink, fontSize: 14 },
 });

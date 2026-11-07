@@ -8,6 +8,7 @@ import { useAppStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 import { t } from '@/lib/i18n';
+import { paper } from '@/lib/paper-theme';
 
 /** Opened from the "mot de passe oublié" e-mail: choose a new password. */
 export default function ResetPassword() {
@@ -46,7 +47,7 @@ export default function ResetPassword() {
   if (!ready && !error) {
     return (
       <Screen center>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color={paper.ink} size="large" />
       </Screen>
     );
   }

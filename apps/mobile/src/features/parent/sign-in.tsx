@@ -9,6 +9,7 @@ import { authRedirect, sendPasswordReset, signInWithGoogle } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { colors, space } from '@/lib/theme';
 import { t } from '@/lib/i18n';
+import { font, paper } from '@/lib/paper-theme';
 
 type Mode = 'signIn' | 'signUp' | 'forgot';
 
@@ -138,10 +139,10 @@ export function SignIn({ onBack }: { onBack: () => void }) {
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: space.sm },
   divider: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  line: { flex: 1, height: 1, backgroundColor: colors.surfaceHigh },
-  or: { color: colors.muted, fontSize: 14, fontWeight: '700' },
+  line: { flex: 1, borderTopWidth: 1.5, borderStyle: 'dashed', borderColor: paper.inkFaint },
+  or: { ...font.hand, color: paper.inkSoft, fontSize: 20 },
   forgot: { alignSelf: 'flex-end', paddingVertical: space.xs },
-  link: { color: colors.accent, fontSize: 15, fontWeight: '800' },
+  link: { ...font.semi, color: paper.blueInk, fontSize: 15, textDecorationLine: 'underline' },
   switch: { alignSelf: 'center', paddingVertical: space.sm },
-  switchText: { color: colors.muted, fontSize: 15, textAlign: 'center' },
+  switchText: { ...font.medium, color: paper.inkSoft, fontSize: 15, textAlign: 'center' },
 });

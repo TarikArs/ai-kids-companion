@@ -22,7 +22,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { IconButton } from '@/components/icon-button';
+import { ChunkyButton, NotebookPage, Polaroid, Tape } from '@/components/paper';
 import { ScanOverlay } from '@/components/scan-overlay';
+import { Avatar } from '@/features/board/avatar';
+import { font, hardShadow, paper } from '@/lib/paper-theme';
+import { StatusBar } from 'expo-status-bar';
 import { Body, Button, Screen, Title } from '@/components/ui';
 import { exerciseName, loadFocus, requestHelp, sendTyped } from '@/lib/exercise';
 import { log, logError } from '@/lib/log';
@@ -484,13 +488,15 @@ export default function Camera() {
       <View style={StyleSheet.absoluteFill} {...pinch.panHandlers} />
       {/* Guide: the whole page must be inside. */}
       {session && !looking ? <View style={styles.guide} pointerEvents="none" /> : null}
+      <StatusBar style={looking ? 'dark' : 'light'} />
       {looking ? (
-        <View style={styles.frozen}>
+        <NotebookPage style={styles.frozen} top={40}>
           <View style={styles.frozenPhoto}>
+            <Tape style={{ top: -12, zIndex: 2 }} />
             <Image source={{ uri: looking }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-            <ScanOverlay color={colors.accent} corners={false} />
+            <ScanOverlay color={paper.yellow} corners={false} />
           </View>
-        </View>
+        </NotebookPage>
       ) : null}
 
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
@@ -514,11 +520,16 @@ export default function Camera() {
           {looking ? (
             // One clear state, no text from Silia here: her answer is on the TV.
             <View style={styles.lookingBox}>
-              <Text style={styles.lookingTitle}>{t('{name} regarde…', { name: TUTOR_NAME })}</Text>
-              <Text style={styles.lookingHint}>{t('Regarde la télé, elle te répond.')}</Text>
-              <Pressable accessibilityRole="button" onPress={retake} style={styles.retake}>
-                <Text style={styles.retakeText}>{t('Reprendre la photo')}</Text>
-              </Pressable>
+              <View style={styles.lookingRow}>
+                <Polaroid caption={TUTOR_NAME} width={96} tilt={4}>
+                  <Avatar mood="thinking" />
+                </Polaroid>
+                <View style={styles.lookingTexts}>
+                  <Text style={styles.lookingTitle}>{t('{name} regarde…', { name: TUTOR_NAME })}</Text>
+                  <Text style={styles.lookingHint}>{t('Regarde la télé, elle te répond.')}</Text>
+                </View>
+              </View>
+              <ChunkyButton label={t('Reprendre la photo')} onPress={retake} color="white" size="md" icon="camera" />
             </View>
           ) : (
             <>
@@ -573,7 +584,7 @@ export default function Camera() {
                     value={typed}
                     onChangeText={setTyped}
                     placeholder={t('Ta réponse…')}
-                    placeholderTextColor={colors.muted}
+                    placeholderTextColor={paper.inkFaint}
                     autoFocus
                     returnKeyType="send"
                     onSubmitEditing={sendAnswer}
@@ -640,55 +651,67 @@ const styles = StyleSheet.create({
     bottom: `${GUIDE.bottom * 100}%`,
     borderWidth: 3,
     borderStyle: 'dashed',
-    borderColor: 'rgba(255,201,60,0.9)',
-    borderRadius: 18,
+    borderColor: paper.yellow,
+    borderRadius: 10,
   },
-  frozen: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  frozenPhoto: { width: '84%', height: '56%', marginBottom: '20%', borderRadius: 10, borderWidth: 4, borderColor: colors.accent, overflow: 'hidden' },
+  frozen: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  frozenPhoto: { width: '78%', height: '50%', marginBottom: '28%', backgroundColor: paper.card, padding: 10, paddingBottom: 34, borderWidth: 2, borderColor: paper.ink, borderRadius: 4, transform: [{ rotate: '-2deg' }], ...hardShadow(5) },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm },
   topActions: { flexDirection: 'row', gap: space.sm },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    backgroundColor: 'rgba(27,35,64,0.88)',
-    paddingHorizontal: space.md,
+    backgroundColor: paper.stickyYellow,
+    paddingHorizontal: 14,
     height: 44,
-    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 3,
+    borderBottomRightRadius: 12,
     flexShrink: 1,
+    transform: [{ rotate: '-1.5deg' }],
+    ...hardShadow(3),
   },
-  dot: { width: 12, height: 12, borderRadius: 6 },
-  chipText: { color: colors.text, fontWeight: '900', fontSize: 15 },
+  dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: paper.ink },
+  chipText: { ...font.semi, color: paper.ink, fontSize: 16 },
   bottom: { gap: space.sm },
-  details: { color: colors.muted, fontSize: 12, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: radius.md, padding: space.sm, overflow: 'hidden' },
-  lookingBox: { alignItems: 'center', gap: space.sm, paddingBottom: space.md },
-  lookingTitle: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  lookingHint: { color: colors.muted, fontSize: 15 },
-  retake: { marginTop: space.md, height: 48, paddingHorizontal: 22, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center' },
-  retakeText: { color: colors.text, fontWeight: '800', fontSize: 16 },
+  details: { ...font.regular, color: paper.ink, fontSize: 12, backgroundColor: paper.page, borderWidth: 1.5, borderColor: paper.ink, borderRadius: 8, padding: space.sm, overflow: 'hidden' },
+  lookingRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  lookingTexts: { flex: 1, gap: 4 },
+  lookingBox: { gap: space.md, paddingBottom: space.md, paddingHorizontal: space.sm },
+  lookingTitle: { ...font.bold, color: paper.ink, fontSize: 26 },
+  lookingHint: { ...font.medium, color: paper.inkSoft, fontSize: 17, lineHeight: 23 },
+  retake: { alignSelf: 'center' },
+  retakeText: { ...font.semi, color: paper.ink },
   choices: { gap: space.sm, paddingHorizontal: 2 },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
     maxWidth: 240,
-    height: 48,
-    backgroundColor: 'rgba(27,35,64,0.92)',
-    borderRadius: radius.pill,
+    height: 50,
+    backgroundColor: paper.card,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 10,
     paddingLeft: 6,
     paddingRight: space.md,
+    ...hardShadow(3),
   },
   choiceNumber: {
+    ...font.bold,
     width: 36,
     height: 36,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: colors.accent,
-    color: colors.onAccent,
+    backgroundColor: paper.yellow,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    color: paper.ink,
     fontSize: 18,
-    fontWeight: '900',
     textAlign: 'center',
-    lineHeight: 36,
+    lineHeight: 32,
   },
   focusChip: {
     alignSelf: 'center',
@@ -696,43 +719,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    height: 40,
-    backgroundColor: 'rgba(27,35,64,0.92)',
-    borderRadius: radius.pill,
+    height: 44,
+    backgroundColor: paper.stickyBlue,
+    borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#7FD3FF',
+    borderColor: paper.ink,
     paddingLeft: 4,
     paddingRight: 14,
+    ...hardShadow(3),
   },
   focusNumber: {
+    ...font.bold,
     minWidth: 32,
     height: 32,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#7FD3FF',
-    color: '#1B2340',
+    backgroundColor: paper.blue,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    color: paper.ink,
     fontSize: 16,
-    fontWeight: '900',
     textAlign: 'center',
-    lineHeight: 32,
+    lineHeight: 28,
     paddingHorizontal: 4,
   },
-  focusTitle: { color: colors.text, fontSize: 15, fontWeight: '800', flexShrink: 1 },
+  focusTitle: { ...font.semi, color: paper.ink, fontSize: 16, flexShrink: 1 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   typeInput: {
+    ...font.semi,
     flex: 1,
-    height: 48,
-    backgroundColor: 'rgba(27,35,64,0.95)',
-    color: colors.text,
-    borderRadius: radius.pill,
+    height: 52,
+    backgroundColor: paper.card,
+    color: paper.ink,
+    borderWidth: 2.5,
+    borderColor: paper.ink,
+    borderRadius: 12,
     paddingHorizontal: space.md,
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 21,
+    ...hardShadow(3),
   },
   zoomRow: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: space.sm },
-  zoomBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(27,35,64,0.88)', alignItems: 'center', justifyContent: 'center' },
-  zoomText: { color: colors.text, fontSize: 26, fontWeight: '900', lineHeight: 30 },
-  zoomLevel: { height: 36, paddingHorizontal: space.md, borderRadius: radius.pill, backgroundColor: 'rgba(27,35,64,0.88)', justifyContent: 'center' },
-  zoomLevelText: { color: colors.text, fontSize: 14, fontWeight: '800' },
+  zoomBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: paper.card, borderWidth: 2.5, borderColor: paper.ink, alignItems: 'center', justifyContent: 'center', ...hardShadow(3) },
+  zoomText: { ...font.bold, color: paper.ink, fontSize: 26, lineHeight: 30 },
+  zoomLevel: { height: 36, paddingHorizontal: space.md, borderRadius: 8, backgroundColor: paper.stickyYellow, borderWidth: 2, borderColor: paper.ink, justifyContent: 'center', ...hardShadow(2) },
+  zoomLevelText: { ...font.semi, color: paper.ink, fontSize: 14 },
   mainRow: { flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'flex-end', paddingBottom: space.sm },
 });

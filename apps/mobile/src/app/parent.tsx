@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 import { useSession } from '@/lib/use-session';
 import { t } from '@/lib/i18n';
+import { paper } from '@/lib/paper-theme';
 
 export default function Parent() {
   const session = useSession();
@@ -62,7 +63,7 @@ function Loading({ error, onRetry }: { error?: string; onRetry?: () => void }) {
           {onRetry ? <Button label={t('Réessayer')} onPress={onRetry} /> : null}
         </>
       ) : (
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color={paper.ink} size="large" />
       )}
     </Screen>
   );

@@ -1,39 +1,59 @@
+import { StatusBar } from 'expo-status-bar';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
-
-import { FocusPressable as Pressable } from '@/components/focus-pressable';
+import { ScrollView, StyleSheet, Text, View, type TextInputProps } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, radius, space } from '@/lib/theme';
+import { ChunkyButton, InkLink, NotebookPage, PaperCard, PaperInput, Spiral } from '@/components/paper';
+import { font, MARGIN_X, paper } from '@/lib/paper-theme';
+import { space } from '@/lib/theme';
+
+// The phone's simple screens (sign-in, pairing, setup…) as a page of a spiral notebook.
 
 export function Screen({ children, center = false }: { children: ReactNode; center?: boolean }) {
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, center && styles.center]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.content}>{children}</View>
-      </ScrollView>
+      <StatusBar style="dark" />
+      <NotebookPage fill>
+        <Spiral />
+        <ScrollView contentContainerStyle={[styles.scroll, center && styles.center]} keyboardShouldPersistTaps="handled">
+          <View style={styles.content}>{children}</View>
+        </ScrollView>
+      </NotebookPage>
     </SafeAreaView>
   );
 }
 
+/** A heading written on the page, with a yellow highlighter stroke behind it. */
 export function Title({ children }: { children: ReactNode }) {
-  return <Text style={styles.title}>{children}</Text>;
+  return (
+    <View style={styles.titleWrap}>
+      <View style={styles.highlighter} />
+      <Text style={styles.title}>{children}</Text>
+    </View>
+  );
 }
 
 export function Body({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
-  return <Text style={[styles.body, muted && { color: colors.muted }]}>{children}</Text>;
+  return <Text style={[styles.body, muted && { color: paper.inkSoft }]}>{children}</Text>;
 }
 
+/** A mistake note: red crayon on a pink sticky note. */
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
-  return <Text style={styles.error}>{children}</Text>;
+  return (
+    <PaperCard kind="sticky" color={paper.stickyPink} pad={12} tilt={-1}>
+      <Text style={styles.error}>✗ {children}</Text>
+    </PaperCard>
+  );
 }
 
+/** An index card lying on the page. */
 export function Card({ children }: { children: ReactNode }) {
-  return <View style={styles.card}>{children}</View>;
+  return (
+    <PaperCard kind="index" pad={18} style={{ paddingTop: 22, gap: space.md }}>
+      {children}
+    </PaperCard>
+  );
 }
 
 export function Button({
@@ -49,67 +69,36 @@ export function Button({
   loading?: boolean;
   disabled?: boolean;
 }) {
-  const primary = variant === 'primary';
-  const light = variant === 'light';
-  const textColor = primary || light ? colors.onAccent : colors.text;
+  if (variant === 'ghost') return <InkLink label={label} onPress={onPress} />;
   return (
-    <Pressable
-      accessibilityRole="button"
+    <ChunkyButton
+      label={label}
       onPress={onPress}
-      disabled={disabled || loading}
-      style={({ pressed }) => [
-        styles.button,
-        primary ? styles.buttonPrimary : light ? styles.buttonLight : variant === 'secondary' ? styles.buttonSecondary : styles.buttonGhost,
-        (disabled || loading) && { opacity: 0.5 },
-        pressed && { transform: [{ scale: 0.98 }] },
-      ]}
-    >
-      {loading ? (
-        <ActivityIndicator color={textColor} />
-      ) : (
-        <Text style={[styles.buttonText, { color: textColor }]}>{label}</Text>
-      )}
-    </Pressable>
+      color={variant === 'primary' ? 'yellow' : variant === 'secondary' ? 'red' : 'white'}
+      loading={loading}
+      disabled={disabled}
+    />
   );
 }
 
 export function Field({ label, ...input }: TextInputProps & { label: string }) {
   return (
-    <View style={{ gap: space.xs }}>
+    <View style={{ gap: 6 }}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput placeholderTextColor={colors.muted} style={styles.input} {...input} />
+      <PaperInput {...input} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { flexGrow: 1, padding: space.lg },
+  safe: { flex: 1, backgroundColor: paper.page },
+  scroll: { flexGrow: 1, paddingLeft: MARGIN_X + 18, paddingRight: 22, paddingTop: space.md, paddingBottom: space.xl },
   center: { justifyContent: 'center' },
-  content: { width: '100%', maxWidth: 520, alignSelf: 'center', gap: space.md },
-  title: { color: colors.text, fontSize: 30, fontWeight: '900' },
-  body: { color: colors.text, fontSize: 17, lineHeight: 24 },
-  error: { color: colors.danger, fontSize: 16, fontWeight: '700' },
-  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.md },
-  button: {
-    minHeight: 56,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonPrimary: { backgroundColor: colors.accent },
-  buttonSecondary: { backgroundColor: colors.surfaceHigh },
-  buttonLight: { backgroundColor: '#FFFFFF' },
-  buttonGhost: { backgroundColor: 'transparent' },
-  buttonText: { fontSize: 18, fontWeight: '800' },
-  label: { color: colors.muted, fontSize: 15, fontWeight: '700' },
-  input: {
-    minHeight: 52,
-    borderRadius: radius.md,
-    backgroundColor: colors.bg,
-    color: colors.text,
-    paddingHorizontal: space.md,
-    fontSize: 18,
-  },
+  content: { width: '100%', maxWidth: 520, alignSelf: 'center', gap: space.lg },
+  titleWrap: { alignSelf: 'flex-start' },
+  highlighter: { position: 'absolute', left: -6, right: -8, bottom: 6, height: 16, borderRadius: 4, backgroundColor: paper.yellow, opacity: 0.55, transform: [{ rotate: '-1.2deg' }] },
+  title: { ...font.bold, color: paper.ink, fontSize: 32, lineHeight: 40 },
+  body: { ...font.medium, color: paper.ink, fontSize: 18, lineHeight: 26 },
+  error: { ...font.semi, color: '#C0392B', fontSize: 16, lineHeight: 22 },
+  label: { ...font.semi, color: paper.inkSoft, fontSize: 15 },
 });

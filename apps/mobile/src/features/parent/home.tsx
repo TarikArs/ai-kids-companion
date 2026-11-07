@@ -6,6 +6,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { Icon } from '@/components/icons';
+import { Chunky, HandCaption, NotebookPage, PaperSwitch, Polaroid, Spiral, StickyTabs } from '@/components/paper';
+import { Avatar } from '@/features/board/avatar';
+import { font, hardShadow, paper } from '@/lib/paper-theme';
+import { StatusBar } from 'expo-status-bar';
 import { Button, ErrorText } from '@/components/ui';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
@@ -181,11 +185,24 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <StatusBar style="dark" />
+      <Spiral />
+      <StickyTabs
+        tabs={[
+          { key: 'home', label: t('Accueil'), icon: 'home', color: paper.stickyYellow },
+          { key: 'settings', label: t('Réglages'), icon: 'gear', color: paper.stickyBlue },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      <NotebookPage fill top={20} style={styles.page}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 48 }]} keyboardShouldPersistTaps="handled">
         {tab === 'home' ? (
           <>
             <View style={styles.header}>
-              <Text style={styles.avatar}>{(child?.name ?? household.name).charAt(0).toUpperCase()}</Text>
+              <Polaroid caption={TUTOR_NAME} width={92} tilt={-5} clip={false}>
+                <Avatar mood="idle" />
+              </Polaroid>
               <View style={{ flex: 1 }}>
                 <Text style={styles.family}>{household.name}</Text>
                 <Text style={styles.hello}>{t(hour >= 17 || hour < 4 ? 'Bonsoir !' : 'Bonjour !')}</Text>
@@ -210,9 +227,9 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
             ) : null}
 
             {/* the one main action */}
-            <Pressable accessibilityRole="button" onPress={startHomework} style={({ pressed }) => [styles.start, pressed && { opacity: 0.9 }]}>
+            <Chunky onPress={startHomework} color="yellow" depth={6} radius={20} style={styles.start}>
               <View style={styles.startIcon}>
-                <Icon name="camera" size={30} color={colors.onAccent} />
+                <Icon name="camera" size={30} color={paper.ink} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.startTitle}>{t('Commencer les devoirs')}</Text>
@@ -221,21 +238,21 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
                   {t(soloOn ? 'ce téléphone fait tout' : 'ce téléphone devient la Caméra')}
                 </Text>
               </View>
-              <Text style={[styles.chevron, { color: colors.onAccent }]}>›</Text>
-            </Pressable>
+              <Text style={[styles.chevron, { color: paper.ink }]}>➜</Text>
+            </Chunky>
 
             {report ? (
               <>
-                <Text style={styles.caption}>{t('DERNIÈRE SÉANCE')}</Text>
+                <HandCaption>{t('DERNIÈRE SÉANCE')}</HandCaption>
                 <View style={[styles.group, styles.pad]}>
                   <View style={styles.rowBetween}>
                     <Text style={styles.rowTitle}>{capital(longDate(report.started_at))}</Text>
                     <Text style={styles.sub}>{report.summary.minutes} min</Text>
                   </View>
                   <View style={styles.stats}>
-                    <Stat value={report.summary.right} label={t('justes')} color={colors.success} />
-                    <Stat value={report.summary.wrong} label={t('à revoir')} color="#FF7A7A" />
-                    <Stat value={report.summary.answers} label={t('vérifiées')} color={colors.text} />
+                    <Stat value={report.summary.right} label={t('justes')} color="#1E8E4E" note={paper.stickyGreen} tilt={-2} />
+                    <Stat value={report.summary.wrong} label={t('à revoir')} color="#D63B30" note={paper.stickyPink} tilt={1.5} />
+                    <Stat value={report.summary.answers} label={t('vérifiées')} color={paper.ink} note={paper.stickyBlue} tilt={-1} />
                   </View>
                   <Text style={styles.report} numberOfLines={reportOpen ? undefined : 2}>
                     {report.summary.parent_text}
@@ -247,7 +264,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               </>
             ) : null}
 
-            <Text style={styles.caption}>{t('APPAREILS')}</Text>
+            <HandCaption>{t('APPAREILS')}</HandCaption>
             {devices.length ? (
               <View style={styles.group}>
                 {devices.map((d, i) => (
@@ -275,7 +292,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               const lang = LANGUAGES.find((l) => l.value === (c.tutor_language ?? 'auto')) ?? LANGUAGES[0];
               return (
                 <View key={c.id} style={{ gap: space.sm }}>
-                  <Text style={styles.caption}>{c.name.toUpperCase()}</Text>
+                  <HandCaption>{c.name.toUpperCase()}</HandCaption>
                   <View style={styles.group}>
                     <Row first icon="🎒" title={t('Classe')} value={t(GRADES.find((g) => g.value === (c.grade ?? 1))?.label ?? '')} onPress={() => setSheet({ kind: 'grade', child: c })} />
                     <Row icon="✏️" title={t('Prénom')} value={c.name} onPress={() => setSheet({ kind: 'name', child: c })} />
@@ -285,7 +302,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               );
             })}
 
-            <Text style={styles.caption}>{TUTOR_NAME.toUpperCase()}</Text>
+            <HandCaption>{TUTOR_NAME.toUpperCase()}</HandCaption>
             <View style={styles.group}>
               <Row
                 first
@@ -296,7 +313,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               />
             </View>
 
-            <Text style={styles.caption}>{t('UTILISATION')}</Text>
+            <HandCaption>{t('UTILISATION')}</HandCaption>
             <View style={styles.group}>
               <Row
                 first
@@ -313,7 +330,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               />
             </View>
 
-            <Text style={styles.caption}>{t('APPLICATION')}</Text>
+            <HandCaption>{t('APPLICATION')}</HandCaption>
             <View style={styles.group}>
               <Row
                 first
@@ -324,7 +341,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               />
             </View>
 
-            <Text style={styles.caption}>{t('COMPTE')}</Text>
+            <HandCaption>{t('COMPTE')}</HandCaption>
             <View style={styles.group}>
               {email ? <Row first icon="✉️" title={email} /> : null}
               <Row first={!email} title={t('Se déconnecter')} danger onPress={onSignOut} />
@@ -333,12 +350,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
           </>
         )}
       </ScrollView>
-
-      {/* two places only */}
-      <View style={[styles.tabs, { paddingBottom: Math.max(insets.bottom, 8) + 10 }]}>
-        <TabButton label={t('Accueil')} icon="home" on={tab === 'home'} onPress={() => setTab('home')} />
-        <TabButton label={t('Réglages')} icon="gear" on={tab === 'settings'} onPress={() => setTab('settings')} />
-      </View>
+      </NotebookPage>
 
       <SheetView sheet={sheet} bottom={insets.bottom} onClose={() => setSheet(null)}>
         {sheet?.kind === 'grade' ? (
@@ -420,9 +432,9 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
   );
 }
 
-function Stat({ value, label, color }: { value: number; label: string; color: string }) {
+function Stat({ value, label, color, note, tilt }: { value: number; label: string; color: string; note: string; tilt: number }) {
   return (
-    <View style={styles.stat}>
+    <View style={[styles.stat, { backgroundColor: note, transform: [{ rotate: `${tilt}deg` }] }]}>
       <Text style={[styles.statValue, { color }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -453,7 +465,7 @@ function Row({
     <>
       {icon ? <Text style={styles.rowIcon}>{icon}</Text> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.rowLabel, danger && { color: colors.danger }]} numberOfLines={1}>
+        <Text style={[styles.rowLabel, danger && { color: '#D63B30' }]} numberOfLines={1}>
           {title}
         </Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
@@ -482,25 +494,7 @@ function Row({
 }
 
 function Switch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityState={{ checked: on }}
-      onPress={() => onChange(!on)}
-      style={[styles.switch, { backgroundColor: on ? colors.success : colors.bg }]}
-    >
-      <View style={[styles.knob, on ? { right: 3 } : { left: 3, backgroundColor: colors.muted }]} />
-    </Pressable>
-  );
-}
-
-function TabButton({ label, icon, on, onPress }: { label: string; icon: 'home' | 'gear'; on: boolean; onPress: () => void }) {
-  return (
-    <Pressable accessibilityRole="tab" accessibilityState={{ selected: on }} onPress={onPress} style={styles.tab}>
-      <Icon name={icon} size={24} color={on ? colors.accent : colors.muted} />
-      <Text style={[styles.tabText, on && { color: colors.accent, fontWeight: '900' }]}>{label}</Text>
-    </Pressable>
-  );
+  return <PaperSwitch on={on} onChange={onChange} />;
 }
 
 /** One choice = one sheet from the bottom. */
@@ -509,7 +503,7 @@ function SheetView({ sheet, bottom, onClose, children }: { sheet: Sheet; bottom:
     <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable accessibilityRole="button" accessibilityLabel={t('Fermer')} onPress={onClose} style={styles.backdrop} />
       <View style={[styles.sheet, { paddingBottom: Math.max(bottom, 8) + space.lg }]}>
-        <View style={styles.handle} />
+        <Spiral rings={9} />
         {children}
         <Button label={t('Fermer')} variant="ghost" onPress={onClose} />
       </View>
@@ -563,69 +557,73 @@ function NameEdit({ name, onSave }: { name: string; onSave: (name: string) => vo
   return (
     <View style={{ gap: space.md }}>
       <Text style={styles.sheetTitle}>{t('Prénom')}</Text>
-      <TextInput value={value} onChangeText={setValue} autoFocus maxLength={40} style={styles.input} placeholder={t('Prénom')} placeholderTextColor={colors.muted} />
+      <TextInput value={value} onChangeText={setValue} autoFocus maxLength={40} style={styles.input} placeholder={t('Prénom')} placeholderTextColor={paper.inkFaint} />
       <Button label={t('Enregistrer')} onPress={() => ok && onSave(value.trim())} disabled={!ok} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: space.lg, paddingBottom: space.xl, gap: space.md, width: '100%', maxWidth: 560, alignSelf: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.sm },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    overflow: 'hidden',
-    backgroundColor: colors.accent,
-    color: colors.onAccent,
-    fontSize: 20,
-    fontWeight: '900',
-    textAlign: 'center',
-    lineHeight: 44,
-  },
-  family: { color: colors.muted, fontSize: 13, fontWeight: '700' },
-  hello: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  pageTitle: { color: colors.text, fontSize: 28, fontWeight: '900', marginTop: space.sm },
-  start: { flexDirection: 'row', alignItems: 'center', gap: space.md, backgroundColor: colors.accent, borderRadius: radius.lg, paddingVertical: 20, paddingHorizontal: 18 },
-  startIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(27,35,64,0.12)', alignItems: 'center', justifyContent: 'center' },
-  startTitle: { color: colors.onAccent, fontSize: 20, fontWeight: '900' },
-  startSub: { color: colors.onAccent, fontSize: 14, fontWeight: '700' },
-  caption: { color: colors.muted, fontSize: 13, fontWeight: '900', letterSpacing: 1, paddingHorizontal: 4, marginTop: space.xs },
-  group: { backgroundColor: colors.surface, borderRadius: 20, overflow: 'hidden' },
+  root: { flex: 1, backgroundColor: paper.page },
+  page: { borderTopWidth: 2, borderColor: paper.ink },
+  content: { paddingLeft: 46, paddingRight: 20, paddingTop: space.lg, gap: space.md, width: '100%', maxWidth: 560, alignSelf: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.xs },
+  family: { ...font.medium, color: paper.inkSoft, fontSize: 15 },
+  hello: { ...font.bold, color: paper.ink, fontSize: 30 },
+  pageTitle: { ...font.bold, color: paper.ink, fontSize: 32, marginTop: space.xs },
+  start: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 18, paddingHorizontal: 16, marginVertical: space.sm },
+  startIcon: { width: 54, height: 54, borderRadius: 27, borderWidth: 2.5, borderColor: paper.ink, backgroundColor: paper.card, alignItems: 'center', justifyContent: 'center' },
+  startTitle: { ...font.bold, color: paper.ink, fontSize: 22 },
+  startSub: { ...font.medium, color: paper.ink, fontSize: 14 },
+  caption: { ...font.hand, color: paper.blueInk, fontSize: 24 },
+  group: { backgroundColor: paper.card, borderRadius: 10, borderWidth: 2, borderColor: paper.ink, ...hardShadow(4) },
   pad: { padding: space.md, gap: space.md },
   rowBetween: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: space.sm },
-  rowTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
-  sub: { color: colors.muted, fontSize: 14, lineHeight: 19 },
-  stats: { flexDirection: 'row', gap: space.sm },
-  stat: { flex: 1, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 10, alignItems: 'center' },
-  statValue: { fontSize: 24, fontWeight: '900' },
-  statLabel: { color: colors.muted, fontSize: 12, fontWeight: '800' },
-  report: { color: colors.text, fontSize: 15, lineHeight: 21 },
-  link: { color: colors.accent, fontSize: 14, fontWeight: '900' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: space.md, minHeight: 52 },
-  rowIcon: { fontSize: 20, width: 28, textAlign: 'center' },
-  rowLabel: { color: colors.text, fontSize: 16, fontWeight: '800' },
-  rowSub: { color: colors.muted, fontSize: 12, fontWeight: '700', lineHeight: 16, marginTop: 2 },
-  rowValue: { color: colors.muted, fontSize: 15, fontWeight: '800', maxWidth: 140 },
-  chevron: { color: colors.muted, fontSize: 24, fontWeight: '900' },
-  sep: { height: 1, backgroundColor: colors.bg, marginLeft: 56 },
-  addDevice: { height: 52, borderRadius: 18, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-  addDeviceText: { color: colors.accent, fontSize: 15, fontWeight: '900' },
-  codeCard: { alignItems: 'center', gap: space.sm, padding: space.md, borderWidth: 2, borderColor: colors.accent },
-  codeLabel: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  code: { color: colors.accent, fontSize: 52, fontWeight: '900', letterSpacing: 6 },
-  switch: { width: 50, height: 30, borderRadius: 15, justifyContent: 'center' },
-  knob: { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF' },
-  tabs: { flexDirection: 'row', backgroundColor: '#141B33', paddingTop: 8, paddingBottom: 18 },
-  tab: { flex: 1, alignItems: 'center', gap: 2 },
-  tabText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(10,14,30,0.6)' },
-  sheet: { backgroundColor: colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: space.lg, paddingBottom: space.xl, gap: space.md },
-  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: colors.surfaceHigh, alignSelf: 'center' },
-  sheetTitle: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: colors.muted },
-  radioOn: { borderWidth: 7, borderColor: colors.accent },
-  input: { backgroundColor: colors.surface, color: colors.text, borderRadius: 14, paddingHorizontal: space.md, minHeight: 50, fontSize: 18, fontWeight: '800' },
+  rowTitle: { ...font.bold, color: paper.ink, fontSize: 17 },
+  sub: { ...font.regular, color: paper.inkSoft, fontSize: 15, lineHeight: 20 },
+  stats: { flexDirection: 'row', gap: space.sm, paddingVertical: 4 },
+  stat: { flex: 1, borderWidth: 2, borderColor: paper.ink, borderRadius: 3, borderBottomRightRadius: 12, paddingVertical: 10, alignItems: 'center', ...hardShadow(3) },
+  statValue: { ...font.bold, fontSize: 28 },
+  statLabel: { ...font.semi, color: paper.ink, fontSize: 13 },
+  report: { ...font.regular, color: paper.ink, fontSize: 16, lineHeight: 23 },
+  link: { ...font.semi, color: paper.blueInk, fontSize: 15, textDecorationLine: 'underline' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: space.md, minHeight: 56 },
+  rowIcon: { fontSize: 22, width: 30, textAlign: 'center' },
+  rowLabel: { ...font.semi, color: paper.ink, fontSize: 17 },
+  rowSub: { ...font.regular, color: paper.inkSoft, fontSize: 13, lineHeight: 17, marginTop: 2 },
+  rowValue: { ...font.semi, color: paper.blueInk, fontSize: 16, maxWidth: 150 },
+  chevron: { ...font.bold, color: paper.ink, fontSize: 20 },
+  sep: { borderTopWidth: 1.5, borderStyle: 'dashed', borderColor: '#C9D6E3', marginLeft: 58 },
+  addDevice: { height: 54, borderRadius: 12, borderWidth: 2.5, borderStyle: 'dashed', borderColor: paper.ink, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.6)' },
+  addDeviceText: { ...font.semi, color: paper.ink, fontSize: 16 },
+  codeCard: { alignItems: 'center', gap: space.sm, padding: space.md, backgroundColor: paper.stickyYellow, borderRadius: 3, borderBottomRightRadius: 18, transform: [{ rotate: '-1deg' }] },
+  codeLabel: { ...font.semi, color: paper.ink, fontSize: 18 },
+  code: { ...font.bold, color: paper.ink, fontSize: 54, letterSpacing: 8 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(45,49,66,0.45)' },
+  sheet: {
+    backgroundColor: paper.page,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    borderColor: paper.ink,
+    paddingHorizontal: space.lg,
+    paddingTop: 6,
+    gap: space.md,
+  },
+  sheetTitle: { ...font.bold, color: paper.ink, fontSize: 24 },
+  radio: { width: 26, height: 26, borderRadius: 13, borderWidth: 2.5, borderColor: paper.ink, backgroundColor: paper.card },
+  radioOn: { borderWidth: 8, borderColor: paper.ink, backgroundColor: paper.yellow },
+  input: {
+    ...font.medium,
+    backgroundColor: paper.card,
+    color: paper.ink,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 12,
+    paddingHorizontal: space.md,
+    minHeight: 54,
+    fontSize: 19,
+    boxShadow: 'inset 0px 3px 0px rgba(45,49,66,0.12)',
+  },
 });

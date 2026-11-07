@@ -1,12 +1,14 @@
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { FocusPressable as Pressable } from '@/components/focus-pressable';
-
-import { colors } from '@/lib/theme';
+import { Chunky, type Crayon } from '@/components/paper';
+import { font, hardShadow, paper } from '@/lib/paper-theme';
 
 import { Icon, type IconName } from './icons';
 
-/** Round icon button. `label` is read by screen readers; `caption` is an optional tiny visible word. */
+/**
+ * Round chunky button of the Camera: crayon colour, thick pencil border, hard shadow; it sinks when pressed.
+ * `label` is read by screen readers; `caption` is a small paper label under it (readable over the camera picture).
+ */
 export function IconButton({
   icon,
   label,
@@ -21,37 +23,43 @@ export function IconButton({
   label: string;
   onPress: () => void;
   size?: number;
-  tone?: 'dark' | 'accent' | 'danger';
+  tone?: 'dark' | 'accent' | 'danger' | 'green';
   disabled?: boolean;
   loading?: boolean;
   caption?: string;
 }) {
-  const bg = tone === 'accent' ? colors.accent : tone === 'danger' ? '#E5484D' : 'rgba(27,35,64,0.88)';
-  const fg = tone === 'accent' ? colors.onAccent : colors.text;
+  const color: Crayon = tone === 'accent' ? 'yellow' : tone === 'danger' ? 'red' : tone === 'green' ? 'green' : 'white';
   return (
     <View style={styles.wrap}>
-      <Pressable
-        accessibilityRole="button"
+      <Chunky
         accessibilityLabel={label}
         onPress={onPress}
+        color={color}
         disabled={disabled || loading}
-        hitSlop={8}
-        style={({ pressed }) => [
-          styles.button,
-          { width: size, height: size, borderRadius: size / 2, backgroundColor: bg },
-          (disabled || loading) && { opacity: 0.45 },
-          pressed && { transform: [{ scale: 0.94 }] },
-        ]}
+        radius={size / 2}
+        depth={size >= 80 ? 6 : 4}
+        style={{ width: size, height: size }}
       >
-        {loading ? <ActivityIndicator color={fg} /> : <Icon name={icon} size={size * 0.44} color={fg} />}
-      </Pressable>
+        {loading ? <ActivityIndicator color={paper.ink} /> : <Icon name={icon} size={size * 0.44} color={paper.ink} />}
+      </Chunky>
       {caption ? <Text style={styles.caption}>{caption}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', gap: 4 },
-  button: { alignItems: 'center', justifyContent: 'center' },
-  caption: { color: colors.text, fontSize: 13, fontWeight: '800', textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3 },
+  wrap: { alignItems: 'center', gap: 8 },
+  caption: {
+    ...font.semi,
+    color: paper.ink,
+    fontSize: 13,
+    backgroundColor: paper.card,
+    borderWidth: 1.5,
+    borderColor: paper.ink,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+    overflow: 'hidden',
+    ...hardShadow(2),
+  },
 });
