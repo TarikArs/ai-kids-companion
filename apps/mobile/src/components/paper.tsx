@@ -99,8 +99,8 @@ export function PaperCard({
 
 // ---------- buttons ----------
 
-export type Crayon = 'yellow' | 'red' | 'green' | 'blue' | 'white';
-const CRAYON: Record<Crayon, string> = { yellow: paper.yellow, red: paper.red, green: paper.green, blue: paper.blue, white: paper.card };
+export type Crayon = 'yellow' | 'red' | 'green' | 'blue' | 'white' | 'pink';
+const CRAYON: Record<Crayon, string> = { yellow: paper.yellow, red: paper.red, green: paper.green, blue: paper.blue, white: paper.card, pink: '#FF9EB5' };
 
 /**
  * A chunky physical button: crayon colour, thick pencil border, hard shadow. Pressed, it sinks onto the page

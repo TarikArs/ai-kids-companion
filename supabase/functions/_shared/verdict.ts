@@ -325,13 +325,16 @@ export async function solutionLines(
   pageText?: () => Promise<string>,
 ): Promise<{ lines: Line[]; explain: string }> {
   const lines = judge(e);
-  const aboutText = needsPageText(e, ABOUT_TEXT);
+  // No answer places read for this exercise (the reading put none under it): the questions are taken from its printed
+  // text, so the Board still shows each question with its answer.
+  const noItems = lines.length === 0;
+  const aboutText = noItems || needsPageText(e, ABOUT_TEXT);
   const text = aboutText && pageText ? await pageText().catch(() => '') : '';
   const out = await ask(
     `You are Silia, the kind teacher of a girl in ${grade}. She asked for the solution of this exercise.
 ${exerciseBrief(e)}
 ${text ? `Printed text of the page (find THIS exercise in it):\n"""${text.slice(0, 4000)}"""\n` : ''}Items, with what she answered (already read):
-${lines.map((l, i) => `${i}. ${l.q}  ->  she answered: ${l.a ? `"${l.a}"` : '(nothing)'}${l.expected ? `  [right answer, computed: ${l.expected}]` : ''}`).join('\n')}
+${noItems ? '(none were read: find the questions of THIS exercise in its statement or the page text, in order, and give q = each question, short)' : lines.map((l, i) => `${i}. ${l.q}  ->  she answered: ${l.a ? `"${l.a}"` : '(nothing)'}${l.expected ? `  [right answer, computed: ${l.expected}]` : ''}`).join('\n')}
 Everything needed is printed in the exercise (statement, numbers, riddle): NEVER say you cannot know, that something is
 missing or that you need to see an object. Think it through and check it (count, compute) before answering.
 If several answers fit the statement (a range), x = the smallest one, and say in « say » that the others fit too.
@@ -339,18 +342,24 @@ For each item: x = the right answer, short, exactly as it should be written (kee
 ok = true if her answer is right, false if wrong, null if she answered nothing.
 say = 1 to 3 short sentences in ${SPEAKING_STYLE[language]}: explain how to find the right answer of her FIRST wrong item
 (or of the first item if none is wrong), with the steps, so she understands. Here you MAY say the answer.
-Return JSON only: {"r":[{"i":0,"x":"...","ok":true}],"say":"..."}`,
+Read the numbers of the statement carefully, digit by digit (46 is not 45).
+Return JSON only: {"r":[{"i":0,${noItems ? '"q":"...",' : ''}"x":"...","ok":true}],"say":"..."}`,
     2500,
     'medium',
     true,
   );
-  let parsed: { r?: { i?: number; x?: string; ok?: boolean | null }[]; say?: string } = {};
+  let parsed: { r?: { i?: number; q?: string; x?: string; ok?: boolean | null }[]; say?: string } = {};
   try {
     parsed = JSON.parse(out ?? '{}');
   } catch {
     // keep the code's answers only
   }
-  for (const r of parsed.r ?? []) {
+  if (noItems) {
+    for (const r of (parsed.r ?? []).slice(0, 8)) {
+      if (r.q && r.x) lines.push({ q: String(r.q).slice(0, 160), a: null, status: 'empty', c: 1, expected: String(r.x).slice(0, 80) });
+    }
+  }
+  for (const r of noItems ? [] : (parsed.r ?? [])) {
     const l = typeof r.i === 'number' ? lines[r.i] : undefined;
     if (!l) continue;
     if (!l.expected && r.x) l.expected = String(r.x).slice(0, 80);

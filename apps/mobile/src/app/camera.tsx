@@ -22,7 +22,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
 import { IconButton } from '@/components/icon-button';
-import { ChunkyButton, NotebookPage, Polaroid, Tape } from '@/components/paper';
+import { Chunky, ChunkyButton, NotebookPage, Polaroid, Tape, type Crayon } from '@/components/paper';
+import { Icon, type IconName } from '@/components/icons';
 import { ScanOverlay } from '@/components/scan-overlay';
 import { Avatar } from '@/features/board/avatar';
 import { font, hardShadow, paper } from '@/lib/paper-theme';
@@ -51,7 +52,15 @@ import { applyFamilyLang, t } from '@/lib/i18n';
 // Photos are taken ONLY when Lina presses « Silia, regarde » (here or on the Board). 1536 px: pencil digits stay readable.
 const MAX_SIDE = 1536;
 /** The dashed page guide on screen: only what is inside it is sent (side margins in px, top/bottom in screen fractions). */
-const GUIDE = { side: 24, top: 0.16, bottom: 0.28 };
+const GUIDE = { side: 24, top: 0.13, bottom: 0.37 };
+
+/** The help tiles of the exercise card (Solution only when the parent turned it on). */
+const HELP_TILES: { action: 'explain' | 'solve' | 'similar' | 'solution'; label: string; icon: IconName; color: Crayon }[] = [
+  { action: 'explain', label: 'Expliquer', icon: 'info', color: 'blue' },
+  { action: 'solve', label: 'Ensemble', icon: 'play', color: 'white' },
+  { action: 'similar', label: 'Similaire', icon: 'copy', color: 'pink' },
+  { action: 'solution', label: 'Solution', icon: 'key', color: 'green' },
+];
 /** Kept around the guide when cropping (fraction of the cropped size): a page edge just outside the line is not cut. */
 const CROP_MARGIN = 0.04;
 
@@ -193,15 +202,18 @@ export default function Camera() {
 
   /** « Un seul téléphone » (parent setting): after each photo, this phone turns into the Board. */
   const soloRef = useRef(false);
+  /** Parent setting « Solution »: the Solution tile on the exercise card. */
+  const [solutionOn, setSolutionOn] = useState(false);
   useEffect(() => {
     if (!device) return;
     supabase
       .from('households')
-      .select('solo_mode, app_lang')
+      .select('solo_mode, app_lang, solution_enabled')
       .eq('id', device.householdId)
       .maybeSingle()
       .then(({ data }) => {
         soloRef.current = (data as { solo_mode?: boolean } | null)?.solo_mode === true;
+        setSolutionOn((data as { solution_enabled?: boolean } | null)?.solution_enabled === true);
         applyFamilyLang((data as { app_lang?: string } | null)?.app_lang);
       });
   }, [device]);
@@ -427,6 +439,18 @@ export default function Camera() {
   }
 
   /** Tap on an exercise (several on the page), or « Changer » on the active one. */
+  /** Expliquer / Résoudre ensemble / Exercice similaire / Solution on the active exercise: Silia answers on the Board. */
+  async function askHelp(action: 'explain' | 'solve' | 'similar' | 'solution') {
+    if (!session) return;
+    setChoices([]);
+    const { data, error } = await requestHelp(session.id, { action });
+    if (error) {
+      setDetails(`Erreur exercice : ${error}`);
+      return;
+    }
+    if (data?.ask) setChoices(data.choices ?? []);
+  }
+
   async function choose(choice?: ExerciseChoice) {
     if (!session) return;
     setChoices([]);
@@ -478,7 +502,7 @@ export default function Camera() {
         : looking
           ? t('Photo envoyée')
           : t('{name} t’attend', { name: TUTOR_NAME });
-  const dot = !session ? colors.muted : paused || looking ? colors.accent : talk === 'recording' ? '#E5484D' : colors.success;
+  const dot = !session ? paper.inkFaint : paused || looking ? paper.yellow : talk === 'recording' ? paper.red : paper.green;
 
   return (
     <View
@@ -502,18 +526,29 @@ export default function Camera() {
         </NotebookPage>
       ) : null}
 
+      {session && !looking ? (
+        <View style={styles.zoomStick}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom avant')} onPress={() => setZoomSafe(zoom + 0.05)} disabled={zoom >= 1} style={[styles.zoomBtn, zoom >= 1 && { opacity: 0.4 }]}>
+            <Text style={styles.zoomText}>+</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('Sans zoom')} onPress={() => setZoomSafe(0)} style={styles.zoomLevel}>
+            <Text style={styles.zoomLevelText}>{`${Math.round(zoom * 100)} %`}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom arrière')} onPress={() => setZoomSafe(zoom - 0.05)} disabled={zoom <= 0} style={[styles.zoomBtn, zoom <= 0 && { opacity: 0.4 }]}>
+            <Text style={styles.zoomText}>−</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <View style={styles.chip}>
-            <View style={[styles.dot, { backgroundColor: dot }]} />
-            <Text style={styles.chipText}>{chip}</Text>
-          </View>
+          {/* the state, as a dot (green = Silia waits, yellow = photo sent / paused, red = recording) */}
+          <View accessible accessibilityRole="image" accessibilityLabel={chip} style={[styles.stateDot, { backgroundColor: dot }]} />
           <View style={styles.topActions}>
             {status || details ? <IconButton icon="info" label={t('Détails')} size={44} onPress={() => setShowDetails((v) => !v)} /> : null}
             {session || device.viaParent ? null : (
               <IconButton icon="unlink" label={t('Délier cet appareil')} caption={t('Délier')} size={44} onPress={unpair} />
             )}
-            {device.viaParent ? <IconButton icon="home" label={t('Retour à l’espace parent')} caption="Parent" size={44} onPress={backToParent} /> : null}
+            {device.viaParent ? <IconButton icon="home" label={t('Retour à l’espace parent')} size={44} onPress={backToParent} /> : null}
           </View>
         </View>
 
@@ -537,18 +572,35 @@ export default function Camera() {
           ) : (
             <>
               {focus && !choices.length && session ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Exercice en cours : {ex}, {title}. Toucher pour changer d’exercice.', { ex: exerciseName(focus), title: focus.title })}
-                  onPress={() => choose()}
-                  disabled={!idle}
-                  style={({ pressed }) => [styles.focusChip, pressed && { opacity: 0.8 }]}
-                >
-                  <Text style={styles.focusNumber}>{exerciseName(focus)}</Text>
-                  <Text style={styles.focusTitle} numberOfLines={1}>
-                    {focus.title}
-                  </Text>
-                </Pressable>
+                // The exercise in progress and what she can ask about it: the phone is the Board's remote control.
+                <NotebookPage style={styles.exCard} top={6}>
+                  <View style={styles.exHead}>
+                    <Text style={styles.focusNumber}>{exerciseName(focus)}</Text>
+                    <Text style={styles.focusTitle} numberOfLines={1}>
+                      {focus.title}
+                    </Text>
+                    <ChunkyButton label={t('Autre')} icon="refresh" color="white" size="sm" onPress={() => choose()} disabled={!idle} />
+                  </View>
+                  <View style={styles.exTiles}>
+                    {HELP_TILES.filter((h) => h.action !== 'solution' || solutionOn).map(({ action, label, icon, color }) => (
+                      <Chunky
+                        key={action}
+                        accessibilityLabel={t(label)}
+                        onPress={() => askHelp(action)}
+                        color={color}
+                        disabled={!idle || paused}
+                        radius={12}
+                        depth={3}
+                        style={styles.exTile}
+                      >
+                        <Icon name={icon} size={22} color={paper.ink} />
+                        <Text style={styles.exTileText} numberOfLines={1}>
+                          {t(label)}
+                        </Text>
+                      </Chunky>
+                    ))}
+                  </View>
+                </NotebookPage>
               ) : null}
               {choices.length ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choices}>
@@ -567,19 +619,6 @@ export default function Camera() {
                     </Pressable>
                   ))}
                 </ScrollView>
-              ) : null}
-              {session ? (
-                <View style={styles.zoomRow}>
-                  <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom arrière')} onPress={() => setZoomSafe(zoom - 0.05)} disabled={zoom <= 0} style={[styles.zoomBtn, zoom <= 0 && { opacity: 0.4 }]}>
-                    <Text style={styles.zoomText}>−</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={t('Sans zoom')} onPress={() => setZoomSafe(0)} style={styles.zoomLevel}>
-                    <Text style={styles.zoomLevelText}>{zoom > 0 ? `${t('Zoom')} ${Math.round(zoom * 100)} %` : t('Zoom')}</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom avant')} onPress={() => setZoomSafe(zoom + 0.05)} disabled={zoom >= 1} style={[styles.zoomBtn, zoom >= 1 && { opacity: 0.4 }]}>
-                    <Text style={styles.zoomText}>+</Text>
-                  </Pressable>
-                </View>
               ) : null}
               {session && typing ? (
                 <View style={styles.typeRow}>
@@ -761,6 +800,13 @@ const styles = StyleSheet.create({
     fontSize: 21,
     ...hardShadow(3),
   },
+  stateDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2.5, borderColor: paper.ink, ...hardShadow(2) },
+  zoomStick: { position: 'absolute', right: 10, top: '30%', alignItems: 'center', gap: 8, zIndex: 2 },
+  exCard: { borderWidth: 2, borderColor: paper.ink, borderRadius: 14, padding: 10, gap: 10, overflow: 'hidden', ...hardShadow(4) },
+  exHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  exTiles: { flexDirection: 'row', gap: 8 },
+  exTile: { flex: 1, height: 64, gap: 3, paddingHorizontal: 2 },
+  exTileText: { ...font.semi, color: paper.ink, fontSize: 12 },
   zoomRow: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: space.sm },
   zoomBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: paper.card, borderWidth: 2.5, borderColor: paper.ink, alignItems: 'center', justifyContent: 'center', ...hardShadow(3) },
   zoomText: { ...font.bold, color: paper.ink, fontSize: 26, lineHeight: 30 },
