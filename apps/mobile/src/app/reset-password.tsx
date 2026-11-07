@@ -7,6 +7,7 @@ import { authParams, completeAuth } from '@/lib/auth';
 import { useAppStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
+import { t } from '@/lib/i18n';
 
 /** Opened from the "mot de passe oublié" e-mail: choose a new password. */
 export default function ResetPassword() {
@@ -33,7 +34,7 @@ export default function ResetPassword() {
   }, []);
 
   async function save() {
-    if (password !== confirm) return setError('Les deux mots de passe sont différents.');
+    if (password !== confirm) return setError(t('Les deux mots de passe sont différents.'));
     setBusy(true);
     setError('');
     const { error: e } = await supabase.auth.updateUser({ password });
@@ -52,12 +53,12 @@ export default function ResetPassword() {
 
   return (
     <Screen center>
-      <Title>Nouveau mot de passe</Title>
+      <Title>{t('Nouveau mot de passe')}</Title>
       {done ? (
         <Card>
-          <Body>C’est enregistré.</Body>
+          <Body>{t('C’est enregistré.')}</Body>
           <Button
-            label="Continuer"
+            label={t('Continuer')}
             onPress={() => {
               setRole('parent');
               router.replace('/parent');
@@ -66,16 +67,16 @@ export default function ResetPassword() {
         </Card>
       ) : ready ? (
         <Card>
-          <Field label="Nouveau mot de passe" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" />
-          <Field label="Encore une fois" value={confirm} onChangeText={setConfirm} secureTextEntry autoComplete="new-password" />
+          <Field label={t('Nouveau mot de passe')} value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" />
+          <Field label={t('Encore une fois')} value={confirm} onChangeText={setConfirm} secureTextEntry autoComplete="new-password" />
           <ErrorText>{error}</ErrorText>
-          <Button label="Enregistrer" onPress={save} loading={busy} disabled={password.length < 6 || !confirm} />
+          <Button label={t('Enregistrer')} onPress={save} loading={busy} disabled={password.length < 6 || !confirm} />
         </Card>
       ) : (
         <Card>
           <ErrorText>{error}</ErrorText>
-          <Body muted>Le lien a peut-être expiré. Demande un nouveau lien.</Body>
-          <Button label="Retour à la connexion" onPress={() => router.replace('/parent')} />
+          <Body muted>{t('Le lien a peut-être expiré. Demande un nouveau lien.')}</Body>
+          <Button label={t('Retour à la connexion')} onPress={() => router.replace('/parent')} />
         </Card>
       )}
     </Screen>

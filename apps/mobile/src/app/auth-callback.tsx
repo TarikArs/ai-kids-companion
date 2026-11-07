@@ -7,6 +7,7 @@ import { authParams, completeAuth } from '@/lib/auth';
 import { useAppStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
+import { t } from '@/lib/i18n';
 
 /** Google sign-in comes back here (web, or a phone opening the link). */
 export default function AuthCallback() {
@@ -36,7 +37,7 @@ export default function AuthCallback() {
       {error ? (
         <>
           <ErrorText>{error}</ErrorText>
-          <Button label="Retour à la connexion" onPress={() => router.replace('/parent')} />
+          <Button label={t('Retour à la connexion')} onPress={() => router.replace('/parent')} />
         </>
       ) : (
         <ActivityIndicator color={colors.accent} size="large" />

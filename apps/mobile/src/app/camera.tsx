@@ -15,6 +15,7 @@ import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,7 +33,6 @@ import {
   onEvent,
   sendEvent,
   sessionChannel,
-  setSessionStatus,
   startSession,
   type HomeworkSession,
 } from '@/lib/session';
@@ -41,6 +41,7 @@ import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { useUnpair } from '@/lib/use-unpair';
+import { applyFamilyLang, t } from '@/lib/i18n';
 
 // Photos are taken ONLY when Lina presses « Silia, regarde » (here or on the Board). 1536 px: pencil digits stay readable.
 const MAX_SIDE = 1536;
@@ -175,6 +176,29 @@ export default function Camera() {
   /** Active exercise (synced with the Board: voice, taps on either screen). */
   const [focus, setFocus] = useState<ExerciseFocus | null>(null);
 
+  // The Camera is always upright: preview, dashed guide and photo stay in the same orientation.
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => undefined);
+    return () => {
+      ScreenOrientation.unlockAsync().catch(() => undefined);
+    };
+  }, []);
+
+  /** « Un seul téléphone » (parent setting): after each photo, this phone turns into the Board. */
+  const soloRef = useRef(false);
+  useEffect(() => {
+    if (!device) return;
+    supabase
+      .from('households')
+      .select('solo_mode, app_lang')
+      .eq('id', device.householdId)
+      .maybeSingle()
+      .then(({ data }) => {
+        soloRef.current = (data as { solo_mode?: boolean } | null)?.solo_mode === true;
+        applyFamilyLang((data as { app_lang?: string } | null)?.app_lang);
+      });
+  }, [device]);
+
   // Resume an open session after a restart.
   useEffect(() => {
     if (!device) return;
@@ -234,7 +258,14 @@ export default function Camera() {
       try {
         const photo = await withTimeout(cameraRef.current.takePictureAsync({ quality: 0.8, shutterSound: false }), 10_000, 'Photo');
         // Upright size first, then keep only the page guide's area, then resize.
-        const base = await ImageManipulator.manipulate(photo.uri).renderAsync();
+        let base = await ImageManipulator.manipulate(photo.uri).renderAsync();
+        // A phone held flat over the notebook often saves the photo sideways (no orientation in the file), while the
+        // screen shows it upright: turn it a quarter so it matches what Lina saw, then the guide's crop is right.
+        const screen = screenRef.current;
+        if (screen.h > screen.w && base.width > base.height) {
+          base = await ImageManipulator.manipulate(base).rotate(90).renderAsync();
+          log('camera', 'photo: saved sideways, turned to match the screen');
+        }
         const context = ImageManipulator.manipulate(base);
         const crop = guideCrop(base.width, base.height, screenRef.current.w, screenRef.current.h);
         if (crop) context.crop({ originX: crop.x, originY: crop.y, width: crop.w, height: crop.h });
@@ -250,7 +281,7 @@ export default function Camera() {
         log('camera', `photo: ${Math.round(bytes / 1000)} KB, ${saved.width}x${saved.height}, ${Date.now() - t0} ms`);
         if (bytes < MIN_PHOTO_BYTES) {
           failed('dark');
-          setStatus('Je ne vois pas bien le cahier. Vise la page, avec de la lumière.');
+          setStatus(t('Je ne vois pas bien le cahier. Vise la page, avec de la lumière.'));
           setDetails(`Photo trop sombre ou floue (${Math.round(bytes / 1000)} Ko), pas envoyée.`);
           return;
         }
@@ -273,6 +304,12 @@ export default function Camera() {
             if (channelRef.current) sendEvent(channelRef.current, 'snapshot.new', { snapshot_id: snap.id, storage_path: path });
           });
         const analyze = supabase.functions.invoke('analyze-snapshot', { body: { snapshot_id: snap.id, image_b64: saved.base64, turn } });
+        if (soloRef.current) {
+          // One phone: it becomes the Board now (the photo and the answer are shown there); the requests go on.
+          Promise.all([upload, analyze]).catch((e) => logError('camera', 'solo photo failed', e));
+          router.replace({ pathname: '/board', params: { solo: '1', photo: snap.id } });
+          return;
+        }
         const [, { data, error: fnErr }] = await withTimeout(Promise.all([upload, analyze]), 60_000, 'Analyse');
         if (myId !== captureIdRef.current) return; // « Reprendre la photo », or a newer photo took over
         if (fnErr) throw new Error(await functionError(fnErr));
@@ -282,7 +319,7 @@ export default function Camera() {
       } catch (e) {
         logError('camera', 'photo failed', e);
         failed((e as Error).message);
-        setStatus('Oups, la photo n’est pas passée. Réessaie.');
+        setStatus(t('Oups, la photo n’est pas passée. Réessaie.'));
         setDetails(`Erreur photo : ${(e as Error).message}`);
       } finally {
         if (myId === captureIdRef.current) {
@@ -321,7 +358,7 @@ export default function Camera() {
       log('camera', `talk: stopped, ${audioInfo}`);
       const { data, error } = await supabase.functions.invoke('child-talk', { body: { session_id: session.id, audio_b64: b64, mime, turn: newTurn() } });
       if (error) throw new Error(await functionError(error));
-      if (data?.mode === 'empty') setStatus('Je n’ai rien entendu. Réessaie plus près du téléphone.');
+      if (data?.mode === 'empty') setStatus(t('Je n’ai rien entendu. Réessaie plus près du téléphone.'));
       setDetails(
         [
           audioInfo,
@@ -334,7 +371,7 @@ export default function Camera() {
       );
     } catch (e) {
       logError('camera', 'talk failed', e);
-      setStatus('Je n’ai pas bien entendu. Réessaie.');
+      setStatus(t('Je n’ai pas bien entendu. Réessaie.'));
       setDetails(`Erreur micro : ${(e as Error).message}`);
     } finally {
       setTalk('idle');
@@ -345,7 +382,7 @@ export default function Camera() {
     if (!session || talk !== 'idle') return;
     const perm = await AudioModule.requestRecordingPermissionsAsync();
     if (!perm.granted) {
-      setStatus(`Autorise le micro pour parler à ${TUTOR_NAME}.`);
+      setStatus(t('Autorise le micro pour parler à {name}.', { name: TUTOR_NAME }));
       return;
     }
     try {
@@ -399,30 +436,7 @@ export default function Camera() {
     if (!device) return;
     try {
       setSession(await startSession(device.householdId));
-      setStatus('C’est parti !');
-    } catch (e) {
-      setDetails((e as Error).message);
-    }
-  }
-
-  async function changeStatus(next: 'active' | 'paused' | 'finished') {
-    if (!session) return;
-    try {
-      if (next === 'finished') {
-        // Like a teacher: a short recap for her and a report for the parent, BEFORE the session closes
-        // (the Board is still listening to this session).
-        setStatus(`${TUTOR_NAME} fait le bilan…`);
-        try {
-          const { data } = await withTimeout(supabase.functions.invoke('session-summary', { body: { session_id: session.id, turn: newTurn() } }), 25_000, 'Bilan');
-          log('camera', 'summary', data);
-        } catch (e) {
-          logError('camera', 'summary failed (session closed anyway)', e);
-        }
-      }
-      await setSessionStatus(session.id, next);
-      if (channelRef.current) sendEvent(channelRef.current, 'session.state', { status: next });
-      setSession(next === 'finished' ? null : { ...session, status: next });
-      setStatus(next === 'finished' ? 'Bravo, devoirs terminés !' : next === 'paused' ? 'Pause' : 'C’est reparti !');
+      setStatus(t('C’est parti !'));
     } catch (e) {
       setDetails((e as Error).message);
     }
@@ -432,16 +446,16 @@ export default function Camera() {
   if (!permission) {
     return (
       <Screen center>
-        <Body>Caméra…</Body>
+        <Body>{t('Caméra…')}</Body>
       </Screen>
     );
   }
   if (!permission.granted) {
     return (
       <Screen center>
-        <Title>Caméra</Title>
-        <Body muted>La caméra photographie le cahier quand tu appuies sur « {TUTOR_NAME}, regarde ». Elle ne filme pas l’enfant.</Body>
-        <Button label="Autoriser la caméra" onPress={requestPermission} />
+        <Title>{t('Caméra')}</Title>
+        <Body muted>{t('La caméra photographie le cahier quand tu appuies sur « {name}, regarde ». Elle ne filme pas l’enfant.', { name: TUTOR_NAME })}</Body>
+        <Button label={t('Autoriser la caméra')} onPress={requestPermission} />
       </Screen>
     );
   }
@@ -449,14 +463,14 @@ export default function Camera() {
   const paused = session?.status === 'paused';
   const idle = talk === 'idle' && !taking;
   const chip = !session
-    ? 'Prêt'
+    ? t('Prêt')
     : paused
-      ? 'En pause'
+      ? t('En pause')
       : talk === 'recording'
-        ? `Je t’écoute · ${Math.floor(recState.durationMillis / 1000)} s`
+        ? t('Je t’écoute · {s} s', { s: Math.floor(recState.durationMillis / 1000) })
         : looking
-          ? 'Photo envoyée'
-          : `${TUTOR_NAME} t’attend`;
+          ? t('Photo envoyée')
+          : t('{name} t’attend', { name: TUTOR_NAME });
   const dot = !session ? colors.muted : paused || looking ? colors.accent : talk === 'recording' ? '#E5484D' : colors.success;
 
   return (
@@ -486,16 +500,11 @@ export default function Camera() {
             <Text style={styles.chipText}>{chip}</Text>
           </View>
           <View style={styles.topActions}>
-            {status || details ? <IconButton icon="info" label="Détails" size={44} onPress={() => setShowDetails((v) => !v)} /> : null}
-            {session ? (
-              <>
-                <IconButton icon={paused ? 'play' : 'pause'} label={paused ? 'Reprendre' : 'Pause'} size={44} onPress={() => changeStatus(paused ? 'active' : 'paused')} />
-                <IconButton icon="flag" label="Terminer les devoirs" size={44} onPress={() => changeStatus('finished')} />
-              </>
-            ) : device.viaParent ? null : (
-              <IconButton icon="unlink" label="Délier cet appareil" caption="Délier" size={44} onPress={unpair} />
+            {status || details ? <IconButton icon="info" label={t('Détails')} size={44} onPress={() => setShowDetails((v) => !v)} /> : null}
+            {session || device.viaParent ? null : (
+              <IconButton icon="unlink" label={t('Délier cet appareil')} caption={t('Délier')} size={44} onPress={unpair} />
             )}
-            {device.viaParent ? <IconButton icon="home" label="Retour à l’espace parent" caption="Parent" size={44} onPress={backToParent} /> : null}
+            {device.viaParent ? <IconButton icon="home" label={t('Retour à l’espace parent')} caption="Parent" size={44} onPress={backToParent} /> : null}
           </View>
         </View>
 
@@ -505,10 +514,10 @@ export default function Camera() {
           {looking ? (
             // One clear state, no text from Silia here: her answer is on the TV.
             <View style={styles.lookingBox}>
-              <Text style={styles.lookingTitle}>{TUTOR_NAME} regarde…</Text>
-              <Text style={styles.lookingHint}>Regarde la télé, elle te répond.</Text>
+              <Text style={styles.lookingTitle}>{t('{name} regarde…', { name: TUTOR_NAME })}</Text>
+              <Text style={styles.lookingHint}>{t('Regarde la télé, elle te répond.')}</Text>
               <Pressable accessibilityRole="button" onPress={retake} style={styles.retake}>
-                <Text style={styles.retakeText}>Reprendre la photo</Text>
+                <Text style={styles.retakeText}>{t('Reprendre la photo')}</Text>
               </Pressable>
             </View>
           ) : (
@@ -516,7 +525,7 @@ export default function Camera() {
               {focus && !choices.length && session ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Exercice en cours : ${exerciseName(focus)}, ${focus.title}. Toucher pour changer d’exercice.`}
+                  accessibilityLabel={t('Exercice en cours : {ex}, {title}. Toucher pour changer d’exercice.', { ex: exerciseName(focus), title: focus.title })}
                   onPress={() => choose()}
                   disabled={!idle}
                   style={({ pressed }) => [styles.focusChip, pressed && { opacity: 0.8 }]}
@@ -533,7 +542,7 @@ export default function Camera() {
                     <Pressable
                       key={c.index}
                       accessibilityRole="button"
-                      accessibilityLabel={`Exercice ${exerciseName(c)} : ${c.title}`}
+                      accessibilityLabel={t('Exercice {ex} : {title}', { ex: exerciseName(c), title: c.title })}
                       onPress={() => choose(c)}
                       style={({ pressed }) => [styles.choice, pressed && { opacity: 0.8 }]}
                     >
@@ -547,13 +556,13 @@ export default function Camera() {
               ) : null}
               {session ? (
                 <View style={styles.zoomRow}>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Zoom arrière" onPress={() => setZoomSafe(zoom - 0.05)} disabled={zoom <= 0} style={[styles.zoomBtn, zoom <= 0 && { opacity: 0.4 }]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom arrière')} onPress={() => setZoomSafe(zoom - 0.05)} disabled={zoom <= 0} style={[styles.zoomBtn, zoom <= 0 && { opacity: 0.4 }]}>
                     <Text style={styles.zoomText}>−</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Sans zoom" onPress={() => setZoomSafe(0)} style={styles.zoomLevel}>
-                    <Text style={styles.zoomLevelText}>{zoom > 0 ? `Zoom ${Math.round(zoom * 100)} %` : 'Zoom'}</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t('Sans zoom')} onPress={() => setZoomSafe(0)} style={styles.zoomLevel}>
+                    <Text style={styles.zoomLevelText}>{zoom > 0 ? `${t('Zoom')} ${Math.round(zoom * 100)} %` : t('Zoom')}</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Zoom avant" onPress={() => setZoomSafe(zoom + 0.05)} disabled={zoom >= 1} style={[styles.zoomBtn, zoom >= 1 && { opacity: 0.4 }]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t('Zoom avant')} onPress={() => setZoomSafe(zoom + 0.05)} disabled={zoom >= 1} style={[styles.zoomBtn, zoom >= 1 && { opacity: 0.4 }]}>
                     <Text style={styles.zoomText}>+</Text>
                   </Pressable>
                 </View>
@@ -563,7 +572,7 @@ export default function Camera() {
                   <TextInput
                     value={typed}
                     onChangeText={setTyped}
-                    placeholder="Ta réponse…"
+                    placeholder={t('Ta réponse…')}
                     placeholderTextColor={colors.muted}
                     autoFocus
                     returnKeyType="send"
@@ -571,20 +580,20 @@ export default function Camera() {
                     style={styles.typeInput}
                     maxLength={200}
                   />
-                  <IconButton icon="send" label="Envoyer ma réponse" size={48} tone="accent" onPress={sendAnswer} loading={sending} disabled={!typed.trim()} />
+                  <IconButton icon="send" label={t('Envoyer ma réponse')} size={48} tone="accent" onPress={sendAnswer} loading={sending} disabled={!typed.trim()} />
                 </View>
               ) : null}
 
               {!session ? (
                 <View style={styles.mainRow}>
-                  <IconButton icon="play" label="Commencer les devoirs" caption="Commencer" size={88} tone="accent" onPress={begin} />
+                  <IconButton icon="play" label={t('Commencer les devoirs')} caption={t('Commencer')} size={88} tone="accent" onPress={begin} />
                 </View>
               ) : (
                 <View style={styles.mainRow}>
                   <IconButton
                     icon={talk === 'recording' ? 'stop' : 'mic'}
-                    label={talk === 'recording' ? 'J’ai fini de parler' : `Parler à ${TUTOR_NAME}`}
-                    caption={talk === 'recording' ? 'Stop' : 'Parler'}
+                    label={talk === 'recording' ? t('J’ai fini de parler') : t('Parler à {name}', { name: TUTOR_NAME })}
+                    caption={t(talk === 'recording' ? 'Stop' : 'Parler')}
                     size={68}
                     tone={talk === 'recording' ? 'danger' : 'dark'}
                     onPress={talk === 'recording' ? stopTalk : startTalk}
@@ -593,8 +602,8 @@ export default function Camera() {
                   />
                   <IconButton
                     icon="eye"
-                    label={`${TUTOR_NAME}, regarde`}
-                    caption={`${TUTOR_NAME}, regarde`}
+                    label={t('{name}, regarde', { name: TUTOR_NAME })}
+                    caption={t('{name}, regarde', { name: TUTOR_NAME })}
                     size={112}
                     tone="accent"
                     onPress={() => capture()}
@@ -603,8 +612,8 @@ export default function Camera() {
                   />
                   <IconButton
                     icon="keyboard"
-                    label="Écrire ma réponse"
-                    caption="Écrire"
+                    label={t('Écrire ma réponse')}
+                    caption={t('Écrire')}
                     size={68}
                     tone="dark"
                     onPress={() => setTyping((v) => !v)}

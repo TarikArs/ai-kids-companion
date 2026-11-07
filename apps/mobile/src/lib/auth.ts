@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
 import { supabase } from './supabase';
+import { t } from '@/lib/i18n';
 
 // Web: closes the Google popup/redirect page when it comes back.
 WebBrowser.maybeCompleteAuthSession();
@@ -34,7 +35,7 @@ export async function completeAuth(params: Record<string, string | undefined>): 
   if (params.code) {
     const { error } = await supabase.auth.exchangeCodeForSession(params.code);
     if (error) {
-      if (/verifier/i.test(error.message)) throw new Error('Ouvre le lien sur le même appareil que celui de la demande.');
+      if (/verifier/i.test(error.message)) throw new Error(t('Ouvre le lien sur le même appareil que celui de la demande.'));
       throw error;
     }
     return;
@@ -44,7 +45,7 @@ export async function completeAuth(params: Record<string, string | undefined>): 
     if (error) throw error;
     return;
   }
-  throw new Error('Lien incomplet. Réessaie.');
+  throw new Error(t('Lien incomplet. Réessaie.'));
 }
 
 /** "Continuer avec Google". Returns false when the parent closed the Google window. */

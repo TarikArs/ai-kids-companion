@@ -103,7 +103,9 @@ Deno.serve(async (req) => {
       send('session.rotation', { rotation: reading.rot });
     }
 
-    const usable = reading.readable && !reading.handBlocking;
+    // A finger holding the page is common: the photo is used as long as exercises were read. Rejected only when there is
+    // no page, or a hand hides it (nothing read).
+    const usable = reading.readable && (reading.exercises.length > 0 || !reading.handBlocking);
     const page: PageContext = usable ? pageOf(reading) : { ...pageOf(reading), readable: false };
     // Saved BEFORE answering: a tap on an exercise right after uses this reading (no second reading of the page).
     await admin.from('snapshots').update({ status: usable ? 'analyzed' : 'skipped', exercises: page, page_lang: page.lang }).eq('id', snap.id);

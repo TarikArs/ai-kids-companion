@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
+import { t } from '@/lib/i18n';
 
 /** First launch for a parent: create the household and the first child. */
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -37,13 +38,13 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
   return (
     <Screen center>
-      <Title>Bienvenue</Title>
-      <Body muted>Deux informations pour commencer.</Body>
+      <Title>{t('Bienvenue')}</Title>
+      <Body muted>{t('Deux informations pour commencer.')}</Body>
       <Card>
-        <Field label="Nom de la famille" value={family} onChangeText={setFamily} placeholder="Famille Salhi" />
-        <Field label="Prénom de l’enfant" value={child} onChangeText={setChild} />
+        <Field label={t('Nom de la famille')} value={family} onChangeText={setFamily} placeholder="Famille Salhi" />
+        <Field label={t('Prénom de l’enfant')} value={child} onChangeText={setChild} />
         <ErrorText>{error}</ErrorText>
-        <Button label="Continuer" onPress={create} loading={busy} disabled={!family.trim() || !child.trim()} />
+        <Button label={t('Continuer')} onPress={create} loading={busy} disabled={!family.trim() || !child.trim()} />
       </Card>
     </Screen>
   );

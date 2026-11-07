@@ -36,7 +36,7 @@ export interface ExerciseChoice {
 }
 
 /** What the child wants for an exercise. */
-export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar';
+export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar' | 'solution';
 
 /** The active exercise: stays the focus of follow-up requests until the child switches (voice or tap). */
 export interface ExerciseFocus {
@@ -75,6 +75,8 @@ export interface ResultLine {
   q: string;
   a: string | null;
   status: 'right' | 'wrong' | 'unsure' | 'empty' | 'open';
+  /** « Solution » mode: the right answer, written in chalk next to hers. */
+  solution?: string;
 }
 
 export interface SessionEvents {
@@ -126,7 +128,7 @@ export interface SessionEvents {
     /** Printed instruction (written in chalk on the Board). */
     instr?: string;
     label?: string;
-    mode: 'verdict' | 'guide' | 'start';
+    mode: 'verdict' | 'guide' | 'start' | 'solution';
     lines: ResultLine[];
     /** Her work on the practice exercise (« Exercice similaire »), not on her page. */
     practice?: boolean;

@@ -10,6 +10,7 @@ import { useAppStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 import { useSession } from '@/lib/use-session';
+import { t } from '@/lib/i18n';
 
 export default function Parent() {
   const session = useSession();
@@ -58,7 +59,7 @@ function Loading({ error, onRetry }: { error?: string; onRetry?: () => void }) {
       {error ? (
         <>
           <ErrorText>{error}</ErrorText>
-          {onRetry ? <Button label="Réessayer" onPress={onRetry} /> : null}
+          {onRetry ? <Button label={t('Réessayer')} onPress={onRetry} /> : null}
         </>
       ) : (
         <ActivityIndicator color={colors.accent} size="large" />

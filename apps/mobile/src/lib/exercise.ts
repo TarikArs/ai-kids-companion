@@ -20,6 +20,7 @@ export const ACTION_LABEL: Record<HelpAction, string> = {
   solve: 'Résoudre ensemble',
   correct: 'Vérifier',
   similar: 'Exercice similaire',
+  solution: 'Solution',
 };
 
 /**

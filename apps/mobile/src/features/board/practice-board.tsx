@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { t } from '@/lib/i18n';
 
 export interface PracticeView {
   index: number;
@@ -21,7 +22,7 @@ export function PracticeBoard({ practice }: { practice: PracticeView }) {
   const blank = (q: string) => q.replace(/\?/g, ' ………… ');
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-      <Text style={[styles.tag, dir]}>Exercice similaire</Text>
+      <Text style={[styles.tag, dir]}>{t('Exercice similaire')}</Text>
       <Text style={[styles.instr, dir]}>{practice.instr || practice.title}</Text>
 
       {practice.kind === 'copy'

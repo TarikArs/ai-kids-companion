@@ -7,6 +7,7 @@ import { RoleArt } from '@/components/illustrations';
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
+import { t } from '@/lib/i18n';
 
 /** Board or Camera: sign in anonymously, then claim the 6-digit code shown on the parent's phone. */
 export default function Pair() {
@@ -33,7 +34,7 @@ export default function Pair() {
       });
       if (fnError) throw new Error(await functionError(fnError));
       if (data.role !== role) {
-        throw new Error(`Ce code est pour ${data.role === 'board' ? 'le Tableau' : 'la Caméra'}. Demande un autre code.`);
+        throw new Error(data.role === 'board' ? t('Ce code est pour le Tableau. Demande un autre code.') : t('Ce code est pour la Caméra. Demande un autre code.'));
       }
       setDevice({ id: data.device_id, householdId: data.household_id, role: data.role });
       router.replace(role === 'board' ? '/board' : '/camera');
@@ -48,14 +49,14 @@ export default function Pair() {
     <Screen center>
       <View style={{ alignItems: 'center', gap: 8 }}>
         <RoleArt name={role === 'board' ? 'board' : 'camera'} size={140} />
-        <Title>Relier : {label}</Title>
+        <Title>{t('Relier : {name}', { name: t(label) })}</Title>
       </View>
       <Card>
         <Body muted>
-          Dans l’espace parent, appareil « {label} » → « Relier ». Tape le code affiché.
+          {t('Dans l’espace parent, appareil « {name} » → « Relier ». Tape le code affiché.', { name: t(label) })}
         </Body>
         <Field
-          label="Code à 6 chiffres"
+          label={t('Code à 6 chiffres')}
           value={code}
           onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
           keyboardType="number-pad"
@@ -64,10 +65,10 @@ export default function Pair() {
           autoFocus
         />
         <ErrorText>{error}</ErrorText>
-        <Button label="Relier" onPress={claim} loading={busy} disabled={code.length !== 6} />
+        <Button label={t('Relier')} onPress={claim} loading={busy} disabled={code.length !== 6} />
       </Card>
       <Button
-        label="Changer d’appareil"
+        label={t('Changer d’appareil')}
         variant="ghost"
         onPress={() => {
           setRole(null);

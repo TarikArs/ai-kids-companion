@@ -42,9 +42,13 @@ export interface PageExercise {
   title: string;
   /** Printed instruction (consigne), or the task inferred from the layout. */
   instr: string;
+  /** Printed statement / data of the exercise (word problem, riddle, story lines), verbatim. */
+  tx?: string;
   s: 'empty' | 'partial' | 'done';
   r?: Region;
   items: PageItem[];
+  /** Already read again from a zoom on its box (zoom.ts): not zoomed twice. */
+  z?: boolean;
 }
 
 export interface PageContext {
@@ -80,16 +84,19 @@ export const clampRegion = (r: unknown): Region | undefined =>
 // Compact keys keep the model's output short: output tokens are the main cost in time.
 const readPrompt = (grade: string, hintLang: string) => `Photo of homework by a child in ${grade}. READ what the child wrote; do not correct.
 Return JSON only, compact:
-{"rot":0,"v":true,"h":false,"lang":"fr","e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
+{"rot":0,"v":true,"h":false,"lang":"fr","e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","tx":"","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
 rot: how many degrees the photo must be turned CLOCKWISE so the printed text reads upright (0, 90, 180 or 270).
-v: a homework page is visible. h: a hand or object covers answers. lang: fr|ar|en, the page's language.
+v: a homework page is visible (true even if a little is cut off or a finger holds the edge). h: a hand or object
+hides MOST of the page so its answers cannot be read; a finger or thumb holding the page edge is NOT h. lang: fr|ar|en, the page's language.
 e: the separate exercises in reading order, EVEN EMPTY ONES: n = position 1, 2, 3…; lb = the number printed on the page
-("" if none); ti = short title in the page's language; in = the printed instruction (max 20 words); r = the exercise's box.
+("" if none); ti = short title in the page's language; in = the printed instruction (max 20 words); tx = the printed
+statement and data of the exercise, VERBATIM (word problem, riddle, numbers given, short text; max 80 words; "" if the
+items already say everything); r = the exercise's box.
 Many exercises have NO printed instruction: infer the task from the layout and write it in the page's language, never
 "no instruction". A model letter, digit or word at the start of a line followed by dots, slots or empty space = handwriting
 practice (t=copy): "Écris la lettre A dans chaque case". One item per line: k = "Recopier A", m = the model ("A"),
 a = EVERYTHING she wrote on that line after the model, separated by spaces, exactly as written even if it is another
-letter (e.g. "A a e"); a = null only if all slots are empty. Dots or lines are empty slots, not answers.
+letter (e.g. "A a e"); a = null only if all slots are empty. Dots or lines are empty slots, not answers. Erased pencil (grey ghost marks, smudges left by a rubber) = erased = empty: a = null.
 i: every item where the child must write, empty ones too (a = null); e = the n of its exercise. k: the item as printed with ? for the blank.
 t: fill_in|number_line|word_problem|matching|copy|counting|other.
 a: COPY the child's handwriting digit by digit, exactly as written, even if it is wrong or unfinished. Never write what the
@@ -141,7 +148,7 @@ export async function readPage(imageB64: string, grade: string, hintLang = DEFAU
   const items = (Array.isArray(raw.i) ? raw.i : []) as RawItem[];
   const exercises: PageExercise[] = (Array.isArray(raw.e) ? raw.e : [])
     .slice(0, 12)
-    .map((e: { n?: number; lb?: string; ti?: string; in?: string; r?: number[] }, idx: number) => {
+    .map((e: { n?: number; lb?: string; ti?: string; in?: string; tx?: string; r?: number[] }, idx: number) => {
       const n = typeof e.n === 'number' ? e.n : idx + 1;
       const label = String(e.lb ?? '').trim();
       const mine: PageItem[] = items
@@ -168,6 +175,7 @@ export async function readPage(imageB64: string, grade: string, hintLang = DEFAU
         ...(label && label !== String(n) ? { label } : {}),
         title: String(e.ti ?? '').slice(0, 80) || String(n),
         instr: String(e.in ?? '').slice(0, 200),
+        ...(String(e.tx ?? '').trim() ? { tx: String(e.tx).trim().slice(0, 600) } : {}),
         s: filled === 0 ? 'empty' : filled === mine.length ? 'done' : 'partial',
         ...(r ? { r } : {}),
         items: mine,
@@ -266,3 +274,11 @@ export async function latestSnapshot(sessionId: string): Promise<(SnapshotRow & 
   if (!res.data) res = await get(['uploaded']);
   return (res.data as (SnapshotRow & { taken_at: string }) | null) ?? null;
 }
+
+/** The exercise as given to a text model: instruction + printed statement (a word problem needs its data). */
+export const exerciseBrief = (e: PageExercise) =>
+  `Exercise "${e.title}". Instruction: "${e.instr || '(none printed)'}".${e.tx ? `\nPrinted statement of the exercise: "${e.tx}"` : ''}`;
+
+/** Needs the printed page text to be understood (a story, Vrai/Faux, a word problem whose statement was not read). */
+export const needsPageText = (e: PageExercise, about: RegExp) =>
+  about.test(`${e.title} ${e.instr} ${e.items.map((l) => l.q).join(' ')}`) || (!e.tx && e.items.some((i) => i.t === 'word_problem'));

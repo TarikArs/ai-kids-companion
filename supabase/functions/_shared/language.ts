@@ -142,6 +142,8 @@ export const VERDICT_TEXT: Record<
     next: (n: string) => string;
     guide: string;
     practiceDone: string;
+    solution: string;
+    solutionOff: string;
   }
 > = {
   fr: {
@@ -153,6 +155,8 @@ export const VERDICT_TEXT: Record<
     next: (n) => `Quand tu veux, on passe à l’exercice ${n}.`,
     guide: 'Dis-moi ta réponse, ou écris-la.',
     practiceDone: 'Bravo, l’exercice similaire est tout juste ! Quand tu veux, montre-moi ta page.',
+    solution: 'Voici les bonnes réponses, écrites au tableau.',
+    solutionOff: 'La solution n’est pas activée. Demande à papa ou maman.',
   },
   ar: {
     allGood: 'كلشي صحيح، برافو عليك!',
@@ -163,6 +167,8 @@ export const VERDICT_TEXT: Record<
     next: (n) => `ملي تبغي، ندوزو للتمرين ${n}.`,
     guide: 'قولي ليا الجواب ديالك، ولا كتبيه.',
     practiceDone: 'برافو، التمرين اللي بحالو كلو صحيح! ملي تبغي، ورّيني الصفحة ديالك.',
+    solution: 'ها هي الأجوبة الصحيحة، مكتوبة فالسبورة.',
+    solutionOff: 'الحل ما مفعّلش. طلبي من بابا ولا ماما.',
   },
   fus: {
     allGood: 'كل الأجوبة صحيحة، أحسنتِ!',
@@ -173,6 +179,8 @@ export const VERDICT_TEXT: Record<
     next: (n) => `عندما تكونين مستعدة، ننتقل إلى التمرين ${n}.`,
     guide: 'قولي لي جوابكِ، أو اكتبيه.',
     practiceDone: 'أحسنتِ، التمرين المشابه كله صحيح! عندما تريدين، أريني صفحتكِ.',
+    solution: 'هذه هي الأجوبة الصحيحة، مكتوبة على السبورة.',
+    solutionOff: 'الحل غير مفعّل. اطلبي من أبيكِ أو أمكِ.',
   },
   en: {
     allGood: 'Everything is right, well done!',
@@ -183,10 +191,12 @@ export const VERDICT_TEXT: Record<
     next: (n) => `When you are ready, let’s go to exercise ${n}.`,
     guide: 'Tell me your answer, or type it.',
     practiceDone: 'Well done, the practice exercise is all right! Show me your page when you are ready.',
+    solution: 'Here are the right answers, written on the board.',
+    solutionOff: 'The solution is turned off. Ask mum or dad.',
   },
 };
 
-type Act = 'explain' | 'solve' | 'correct' | 'similar';
+type Act = 'explain' | 'solve' | 'correct' | 'similar' | 'solution';
 const list = (lang: Lang, ns: string[]) => {
   if (ns.length <= 1) return ns.join('');
   const and = { fr: ' et ', ar: ' و', fus: ' و', en: ' and ' }[lang];
@@ -199,6 +209,8 @@ export const FOCUS_TEXT: Record<
   {
     noPhoto: string;
     unreadable: string;
+    /** A hand or object hides the page. */
+    hand: string;
     noExercise: string;
     askWhich: (action: Act | null) => string;
     notFound: (missing: number, available: string[]) => string;
@@ -208,36 +220,40 @@ export const FOCUS_TEXT: Record<
   fr: {
     noPhoto: 'Je n’ai pas encore de photo de ta page. Appuie sur « Silia, regarde ».',
     unreadable: 'Je ne vois pas bien la page : elle est trop sombre, floue ou coupée. Reprends une photo bien droite, avec de la lumière.',
+    hand: 'Oh, une main cache la page ! Enlève-la doucement et appuie encore sur « Silia, regarde ».',
     noExercise: 'Je ne trouve pas d’exercice sur cette photo. Montre-moi la page de plus près.',
     askWhich: (a) =>
-      `Quel exercice ${a === 'solve' ? 'veux-tu qu’on résolve ensemble' : a === 'correct' ? 'veux-tu que je corrige' : a === 'similar' ? 'veux-tu refaire avec un exercice pareil' : 'veux-tu que je t’explique'} ? Dis son numéro ou touche-le.`,
+      `Quel exercice ${a === 'solve' ? 'veux-tu qu’on résolve ensemble' : a === 'correct' ? 'veux-tu que je corrige' : a === 'similar' ? 'veux-tu refaire avec un exercice pareil' : a === 'solution' ? 'veux-tu la solution' : 'veux-tu que je t’explique'} ? Dis son numéro ou touche-le.`,
     notFound: (m, av) => `Je ne vois pas l’exercice ${m} sur la photo. Je vois ${av.length > 1 ? 'les exercices' : 'l’exercice'} ${list('fr', av)}. Lequel veux-tu ?`,
     askAction: (n, t) => `D’accord, l’exercice ${n} : ${t}. Je te l’explique, on le résout ensemble, ou je le corrige ?`,
   },
   ar: {
     noPhoto: 'مازال ما عنديش تصويرة ديال الصفحة. ورّكي على «سيليا، شوفي».',
     unreadable: 'ما كنشوفش الصفحة مزيان: ظلمة ولا مضبّبة ولا مقطوعة. صوّري مرة أخرى مقابلة ومع الضو.',
+    hand: 'اليد مخبّية الصفحة! بعّديها شوية وعاودي ضغطي على « سيليا، شوفي ».',
     noExercise: 'ما لقيتش تمرين فهاد التصويرة. قرّبي ليا الصفحة.',
     askWhich: (a) =>
-      `شمن تمرين ${a === 'solve' ? 'بغيتي نحلّوه مع بعض' : a === 'correct' ? 'بغيتي نصحّح ليك' : a === 'similar' ? 'بغيتي نعطيك بحالو' : 'بغيتي نشرح ليك'}؟ قولي الرقم ديالو ولا ورّكي عليه.`,
+      `شمن تمرين ${a === 'solve' ? 'بغيتي نحلّوه مع بعض' : a === 'correct' ? 'بغيتي نصحّح ليك' : a === 'similar' ? 'بغيتي نعطيك بحالو' : a === 'solution' ? 'بغيتي الحل ديالو' : 'بغيتي نشرح ليك'}؟ قولي الرقم ديالو ولا ورّكي عليه.`,
     notFound: (m, av) => `ما كنشوفش التمرين ${m} فالتصويرة. كنشوف ${list('ar', av)}. شمن واحد بغيتي؟`,
     askAction: (n, t) => `واخا، التمرين ${n}: ${t}. نشرحو ليك، نحلّوه مع بعض، ولا نصحّحو ليك؟`,
   },
   fus: {
     noPhoto: 'ليست لديّ صورة لصفحتكِ بعد. اضغطي على «سيليا، انظري».',
     unreadable: 'لا أرى الصفحة جيدًا: إنها مظلمة أو غير واضحة أو مقطوعة. التقطي صورة أخرى مستقيمة وفي الضوء.',
+    hand: 'يدٌ تُخفي الصفحة! أبعديها قليلًا واضغطي مرة أخرى على « سيليا، انظري ».',
     noExercise: 'لا أجد تمرينًا في هذه الصورة. قرّبي الصفحة قليلًا.',
     askWhich: (a) =>
-      `أيّ تمرين ${a === 'solve' ? 'تريدين أن نحلّه معًا' : a === 'correct' ? 'تريدين أن أصحّحه' : a === 'similar' ? 'تريدين تمرينًا مشابهًا له' : 'تريدين أن أشرحه لكِ'}؟ قولي رقمه أو المسيه.`,
+      `أيّ تمرين ${a === 'solve' ? 'تريدين أن نحلّه معًا' : a === 'correct' ? 'تريدين أن أصحّحه' : a === 'similar' ? 'تريدين تمرينًا مشابهًا له' : a === 'solution' ? 'تريدين حلّه' : 'تريدين أن أشرحه لكِ'}؟ قولي رقمه أو المسيه.`,
     notFound: (m, av) => `لا أرى التمرين ${m} في الصورة. أرى ${av.length > 1 ? 'التمارين' : 'التمرين'} ${list('fus', av)}. أيّها تريدين؟`,
     askAction: (n, t) => `حسنًا، التمرين ${n}: ${t}. هل أشرحه لكِ، أم نحلّه معًا، أم أصحّحه؟`,
   },
   en: {
     noPhoto: 'I don’t have a photo of your page yet. Press “Silia, look”.',
     unreadable: 'I can’t see the page well: it is too dark, blurry or cut off. Take another photo, straight and in the light.',
+    hand: 'Oh, a hand is hiding the page! Move it away and press « Silia, look » again.',
     noExercise: 'I can’t find an exercise on this photo. Show me the page closer.',
     askWhich: (a) =>
-      `Which exercise ${a === 'solve' ? 'shall we solve together' : a === 'correct' ? 'should I correct' : a === 'similar' ? 'do you want a similar one for' : 'should I explain'}? Say its number or tap it.`,
+      `Which exercise ${a === 'solve' ? 'shall we solve together' : a === 'correct' ? 'should I correct' : a === 'similar' ? 'do you want a similar one for' : a === 'solution' ? 'do you want the answers for' : 'should I explain'}? Say its number or tap it.`,
     notFound: (m, av) => `I can’t see exercise ${m} on the photo. I can see exercise${av.length > 1 ? 's' : ''} ${list('en', av)}. Which one?`,
     askAction: (n, t) => `OK, exercise ${n}: ${t}. Shall I explain it, solve it with you, or correct it?`,
   },

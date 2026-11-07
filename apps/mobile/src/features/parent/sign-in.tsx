@@ -8,6 +8,7 @@ import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/component
 import { authRedirect, sendPasswordReset, signInWithGoogle } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { colors, space } from '@/lib/theme';
+import { t } from '@/lib/i18n';
 
 type Mode = 'signIn' | 'signUp' | 'forgot';
 
@@ -15,11 +16,11 @@ const TITLE: Record<Mode, string> = { signIn: 'Espace parent', signUp: 'Créer u
 
 const friendly = (m: string) =>
   /invalid login/i.test(m)
-    ? 'E-mail ou mot de passe incorrect.'
+    ? t('E-mail ou mot de passe incorrect.')
     : /email not confirmed/i.test(m)
-      ? 'Confirme d’abord ton e-mail (regarde ta boîte de réception).'
+      ? t('Confirme d’abord ton e-mail (regarde ta boîte de réception).')
       : /provider is not enabled/i.test(m)
-        ? 'La connexion Google n’est pas encore activée sur le serveur.'
+        ? t('La connexion Google n’est pas encore activée sur le serveur.')
         : m;
 
 export function SignIn({ onBack }: { onBack: () => void }) {
@@ -43,7 +44,7 @@ export function SignIn({ onBack }: { onBack: () => void }) {
     try {
       if (mode === 'forgot') {
         await sendPasswordReset(email);
-        setInfo('Si ce compte existe, un lien vient d’être envoyé. Ouvre-le sur cet appareil.');
+        setInfo(t('Si ce compte existe, un lien vient d’être envoyé. Ouvre-le sur cet appareil.'));
       } else if (mode === 'signIn') {
         const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (e) throw e;
@@ -54,7 +55,7 @@ export function SignIn({ onBack }: { onBack: () => void }) {
           options: { emailRedirectTo: authRedirect('auth-callback') },
         });
         if (e) throw e;
-        if (!data.session) setInfo('Compte créé. Confirme ton e-mail, puis connecte-toi.');
+        if (!data.session) setInfo(t('Compte créé. Confirme ton e-mail, puis connecte-toi.'));
       }
     } catch (e) {
       setError(friendly((e as Error).message));
@@ -81,26 +82,26 @@ export function SignIn({ onBack }: { onBack: () => void }) {
     <Screen center>
       <View style={styles.hero}>
         <RoleArt name="parent" size={140} />
-        <Title>{TITLE[mode]}</Title>
-        {mode === 'forgot' ? <Body muted>On t’envoie un lien pour choisir un nouveau mot de passe.</Body> : null}
+        <Title>{t(TITLE[mode])}</Title>
+        {mode === 'forgot' ? <Body muted>{t('On t’envoie un lien pour choisir un nouveau mot de passe.')}</Body> : null}
       </View>
 
       <Card>
         {mode !== 'forgot' ? (
           <>
-            <Button label="Continuer avec Google" variant="light" onPress={google} loading={busy === 'google'} disabled={!!busy} />
+            <Button label={t('Continuer avec Google')} variant="light" onPress={google} loading={busy === 'google'} disabled={!!busy} />
             <View style={styles.divider}>
               <View style={styles.line} />
-              <Text style={styles.or}>ou</Text>
+              <Text style={styles.or}>{t('ou')}</Text>
               <View style={styles.line} />
             </View>
           </>
         ) : null}
 
-        <Field label="E-mail" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="email" keyboardType="email-address" />
+        <Field label={t('E-mail')} value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="email" keyboardType="email-address" />
         {mode !== 'forgot' ? (
           <Field
-            label="Mot de passe"
+            label={t('Mot de passe')}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -109,14 +110,14 @@ export function SignIn({ onBack }: { onBack: () => void }) {
         ) : null}
         {mode === 'signIn' ? (
           <Pressable accessibilityRole="link" onPress={() => go('forgot')} style={styles.forgot}>
-            <Text style={styles.link}>Mot de passe oublié ?</Text>
+            <Text style={styles.link}>{t('Mot de passe oublié ?')}</Text>
           </Pressable>
         ) : null}
 
         <ErrorText>{error}</ErrorText>
         {info ? <Body>{info}</Body> : null}
         <Button
-          label={mode === 'signIn' ? 'Se connecter' : mode === 'signUp' ? 'Créer le compte' : 'Envoyer le lien'}
+          label={t(mode === 'signIn' ? 'Se connecter' : mode === 'signUp' ? 'Créer le compte' : 'Envoyer le lien')}
           onPress={submit}
           loading={busy === 'email'}
           disabled={!canSubmit || !!busy}
@@ -125,11 +126,11 @@ export function SignIn({ onBack }: { onBack: () => void }) {
 
       <Pressable accessibilityRole="link" onPress={() => go(mode === 'signIn' ? 'signUp' : 'signIn')} style={styles.switch}>
         <Text style={styles.switchText}>
-          {mode === 'signIn' ? 'Pas encore de compte ? ' : mode === 'signUp' ? 'Déjà un compte ? ' : ''}
-          <Text style={styles.link}>{mode === 'signIn' ? 'Créer un compte' : 'Se connecter'}</Text>
+          {mode === 'signIn' ? t('Pas encore de compte ? ') : mode === 'signUp' ? t('Déjà un compte ? ') : ''}
+          <Text style={styles.link}>{t(mode === 'signIn' ? 'Créer un compte' : 'Se connecter')}</Text>
         </Text>
       </Pressable>
-      <Button label="Changer d’appareil" variant="ghost" onPress={onBack} />
+      <Button label={t('Changer d’appareil')} variant="ghost" onPress={onBack} />
     </Screen>
   );
 }

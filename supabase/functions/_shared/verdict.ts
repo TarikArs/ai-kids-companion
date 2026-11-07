@@ -11,7 +11,7 @@ import { expectedAnswer, ownCalculationSlip, sameAnswer } from './arithmetic.ts'
 import { checkCopy, copyModel, verifyCopyLines } from './copy.ts';
 import type { Practice } from './intent.ts';
 import { SPEAKING_STYLE, type Lang } from './language.ts';
-import { readPage, type PageExercise, type PageItem, type Region } from './page.ts';
+import { readPage, type PageExercise, type PageItem, type Region, exerciseBrief, needsPageText } from './page.ts';
 
 const MODEL = Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-6-luna';
 /** Deeper reading that confirms a "wrong" (empty = no confirmation, the fast reading is trusted). */
@@ -36,6 +36,8 @@ export interface Line {
   hn?: string;
   /** Wrong copy: what she wrote that is not the model (for the hint). */
   why?: string;
+  /** Written since the last photo of this exercise (memory.ts): spoken about first. */
+  isNew?: boolean;
 }
 
 const flat = (x: string) => x.toLowerCase().replace(/[\s…_]+/g, '').replace(/\.{2,}/g, '.');
@@ -140,7 +142,7 @@ export async function checkOpen(
   const todo = lines.filter((l) => l.status === 'open' && l.a);
   if (!todo.length) return lines;
   // Questions about a text (Vrai/Faux, « dans le texte »…): start reading the page text now, in parallel.
-  const aboutText = ABOUT_TEXT.test(`${e.title} ${e.instr} ${todo.map((l) => l.q).join(' ')}`);
+  const aboutText = needsPageText(e, ABOUT_TEXT);
   let textPromise = aboutText && pageText ? pageText().catch(() => '') : null;
   // Fast pass without the text (conjugation, spelling, vocabulary)…
   await judgeOpen(e, todo, language, grade, '');
@@ -156,7 +158,7 @@ export async function checkOpen(
 
 async function judgeOpen(e: PageExercise, todo: Line[], language: Lang, grade: string, text: string): Promise<void> {
   const out = await ask(
-    `You are checking the homework of a child in ${grade}. Exercise "${e.title}". Instruction: "${e.instr || '(none printed)'}".
+    `You are checking the homework of a child in ${grade}. ${exerciseBrief(e)}
 ${text ? `Printed text of the page (the story or document the questions are about):\n"""${text.slice(0, 4000)}"""\n` : ''}Items and what she answered (already read; for a table of boxes to tick, her answer is the column she ticked):
 ${todo.map((l, i) => `${i}. ${l.q}  ->  she answered: "${l.a}"`).join('\n')}
 For each item: x = the right answer for this item at her level; ok = true if her answer is right (spelling and endings count
@@ -301,7 +303,7 @@ export async function hintFor(l: Line, language: Lang, grade: string): Promise<s
 export async function guideQuestion(e: PageExercise, open: Line[], language: Lang, grade: string): Promise<string | null> {
   const item = open[0];
   return await ask(
-    `You are Silia, the kind teacher of a girl in ${grade}. Exercise "${e.title}": ${e.instr || '(no instruction)'}.
+    `You are Silia, the kind teacher of a girl in ${grade}. ${exerciseBrief(e)}
 Item: "${item?.q ?? ''}". You cannot be sure of her answer from the photo, so you do NOT judge it.
 Write ONE or TWO short sentences in ${SPEAKING_STYLE[language]}: one concrete step that fits THIS exercise and THIS item
 (read the instruction: conjugate, count, complete a word…), then ask her to say her answer or type it. Never give the
@@ -309,4 +311,51 @@ answer. Never talk about anything that is not in this item. No emojis. Reply wit
     300,
     'low',
   );
+}
+
+/**
+ * « Solution » (only when the parent turned it on): the right answer of every item, and a short explanation.
+ * Arithmetic and copy answers come from the code; the others from one text call (with the page text for questions about
+ * a text). Her written answers keep their verdict (right / wrong) so the Board shows her mistake next to the answer.
+ */
+export async function solutionLines(
+  e: PageExercise,
+  language: Lang,
+  grade: string,
+  pageText?: () => Promise<string>,
+): Promise<{ lines: Line[]; explain: string }> {
+  const lines = judge(e);
+  const aboutText = needsPageText(e, ABOUT_TEXT);
+  const text = aboutText && pageText ? await pageText().catch(() => '') : '';
+  const out = await ask(
+    `You are Silia, the kind teacher of a girl in ${grade}. She asked for the solution of this exercise.
+${exerciseBrief(e)}
+${text ? `Printed text of the page (find THIS exercise in it):\n"""${text.slice(0, 4000)}"""\n` : ''}Items, with what she answered (already read):
+${lines.map((l, i) => `${i}. ${l.q}  ->  she answered: ${l.a ? `"${l.a}"` : '(nothing)'}${l.expected ? `  [right answer, computed: ${l.expected}]` : ''}`).join('\n')}
+Everything needed is printed in the exercise (statement, numbers, riddle): NEVER say you cannot know, that something is
+missing or that you need to see an object. Think it through and check it (count, compute) before answering.
+If several answers fit the statement (a range), x = the smallest one, and say in « say » that the others fit too.
+For each item: x = the right answer, short, exactly as it should be written (keep a computed right answer as given);
+ok = true if her answer is right, false if wrong, null if she answered nothing.
+say = 1 to 3 short sentences in ${SPEAKING_STYLE[language]}: explain how to find the right answer of her FIRST wrong item
+(or of the first item if none is wrong), with the steps, so she understands. Here you MAY say the answer.
+Return JSON only: {"r":[{"i":0,"x":"...","ok":true}],"say":"..."}`,
+    2500,
+    'medium',
+    true,
+  );
+  let parsed: { r?: { i?: number; x?: string; ok?: boolean | null }[]; say?: string } = {};
+  try {
+    parsed = JSON.parse(out ?? '{}');
+  } catch {
+    // keep the code's answers only
+  }
+  for (const r of parsed.r ?? []) {
+    const l = typeof r.i === 'number' ? lines[r.i] : undefined;
+    if (!l) continue;
+    if (!l.expected && r.x) l.expected = String(r.x).slice(0, 80);
+    // Her answer was not checkable from the reading alone: the model's verdict, now that the answer is shown anyway.
+    if (l.a && (l.status === 'open' || l.status === 'unsure') && typeof r.ok === 'boolean') l.status = r.ok ? 'right' : 'wrong';
+  }
+  return { lines, explain: String(parsed.say ?? '').trim() };
 }

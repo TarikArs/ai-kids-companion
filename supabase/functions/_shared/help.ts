@@ -9,7 +9,8 @@ import { HELP_ACTIONS, type Decision, type FocusState, type HelpAction, type Int
 import { downloadB64, pageText, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
 import { admin } from './supabase.ts';
 import { speechUrl } from './tts.ts';
-import { checkOpen, confirm, guideQuestion, hintFor, judge, practiceLines, type Line, type LineStatus } from './verdict.ts';
+import { zoomExercise } from './zoom.ts';
+import { checkOpen, confirm, guideQuestion, hintFor, judge, practiceLines, solutionLines, type Line, type LineStatus } from './verdict.ts';
 
 const MODEL = Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-6-luna';
 const EFFORT = Deno.env.get('OPENAI_REASONING_EFFORT') ?? 'low';
@@ -38,7 +39,11 @@ export const languageFor = (c: HelpCtx, fallback?: string | null): Lang => tutor
 const forcedLang = (c: HelpCtx): Lang | null => (c.setting && c.setting !== 'auto' ? tutorLang(c.setting, null) : null);
 const exName = (e: { n: number; label?: string }) => e.label ?? String(e.n);
 /** "604 - 259 = ?" -> "604 - 259": how an item is said and shown. */
-export const itemLabel = (q: string) => q.replace(/\s*=\s*[?…_.]+\s*$/, '').trim() || q;
+/** "604 - 259 = ?" -> "604 - 259"; "Deux diviseurs de 24 : ? ; ?" -> "Deux diviseurs de 24": how an item is said and shown. */
+export const itemLabel = (q: string) => q.replace(/\s*[:=]\s*(?:[?…_.]+\s*[;,]?\s*)+$/, '').trim() || q;
+/** How an item and an answer are compared between photos. */
+const itemKey = (q: string, practice = false) => `${practice ? 'practice: ' : ''}${q.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+const answerKey = (a: string | null) => (a ?? '').toLowerCase().replace(/[\s.,;:]+/g, '');
 
 /** Broadcast tagged with the request's turn. */
 const bc = (c: HelpCtx, event: string, payload: Record<string, unknown>): Promise<void> =>
@@ -118,8 +123,16 @@ async function say(
 const frame = (e: PageExercise, color = FOCUS_COLOR) => (e.r ? [{ shape: 'text', region: e.r, text: exName(e), color }] : []);
 
 /** Last turns of the conversation (20 min), oldest first, for follow-ups ("et après ?", "j'ai trouvé 50"). */
+/** When the Board was last refreshed (« start over »): memory and conversation before it are forgotten. */
+async function freshAt(sessionId: string): Promise<string | null> {
+  const { data } = await admin.from('homework_sessions').select('fresh_at').eq('id', sessionId).maybeSingle();
+  return (data as { fresh_at?: string | null } | null)?.fresh_at ?? null;
+}
+
 async function history(sessionId: string): Promise<string> {
-  const since = new Date(Date.now() - 20 * 60_000).toISOString();
+  const recent = new Date(Date.now() - 20 * 60_000).toISOString();
+  const fresh = await freshAt(sessionId);
+  const since = fresh && fresh > recent ? fresh : recent;
   const [{ data: kid }, { data: tutor }] = await Promise.all([
     admin.from('child_utterances').select('transcript, created_at').eq('session_id', sessionId).gte('created_at', since).order('created_at', { ascending: false }).limit(5),
     admin.from('tutor_messages').select('text, created_at').eq('session_id', sessionId).neq('kind', 'system').gte('created_at', since).order('created_at', { ascending: false }).limit(5),
@@ -164,7 +177,7 @@ function exerciseBlock(e: PageExercise, page: PageContext, secret: 'none' | 'ver
   return `ACTIVE EXERCISE: number ${exName(e)} on the page${e.label ? ` (position ${e.n})` : ''}, "${e.title}"${
     e.r ? `, around x=${e.r.x.toFixed(2)} y=${e.r.y.toFixed(2)} w=${e.r.w.toFixed(2)} h=${e.r.h.toFixed(2)} (fractions of the photo)` : ''
   }.
-Printed instruction: "${e.instr || '(not read)'}"
+Printed instruction: "${e.instr || '(not read)'}"${e.tx ? `\nPrinted statement: "${e.tx}"` : ''}
 Her answers as read from the photo:
 ${items || '(no answer places found)'}
 ${others ? `Other exercises on the page (context only, do not work on them): ${others}` : ''}`;
@@ -306,12 +319,65 @@ ${languageRule(c)}`;
  * « Silia, regarde » / Corriger on one exercise: verdicts only when the code is sure (verdict.ts), otherwise she guides
  * and asks for Lina's answer. Ticks and circles on the photo, and the per-line result for the Board.
  */
-async function runVerdict(c: HelpCtx, e: PageExercise): Promise<Spoken> {
+async function runVerdict(c: HelpCtx, e0: PageExercise): Promise<Spoken> {
   const lang = languageFor(c);
+  const e = await zoomed(c, e0);
   const text = c.snap ? () => pageText(c.snap!, (p) => p) : undefined;
-  const lines = await confirm(await checkOpen(e, judge(e), lang, c.grade, text), photoOf(c), c.grade, c.log);
+  const lines = await confirm(await remember(c, await checkOpen(e, judge(e), lang, c.grade, text)), photoOf(c), c.grade, c.log);
   const next = c.page!.exercises.filter((x) => x.n > e.n).sort((a, b) => a.n - b.n)[0];
   return await speakLines(c, lines, { index: e.n, title: e.title, instr: e.instr, label: e.label, frame: frame(e), next, guideFor: e });
+}
+
+/**
+ * The exercise read again from a zoom on its box (zoom.ts) when it is a small part of a big page: small digits are read
+ * right (« 30 ; 50 », not « 3 ; 5 ») and the circles land on her answers. Kept in the photo's cached page: done once.
+ */
+async function zoomed(c: HelpCtx, e: PageExercise): Promise<PageExercise> {
+  if (!c.snap || !c.page) return e;
+  const z = await zoomExercise(e, photoOf(c), c.grade, c.log);
+  if (z === e) return e;
+  c.page = { ...c.page, exercises: c.page.exercises.map((x) => (x.n === e.n ? z : x)) };
+  const { error } = await admin.from('snapshots').update({ exercises: c.page }).eq('id', c.snap.id);
+  if (error) c.log('zoomed exercise not saved', error.message);
+  return z;
+}
+
+/**
+ * Memory between photos of the same page: an answer already judged earlier in the session (same item, same answer) keeps
+ * its verdict, so Silia does not ask « c'est bien ça ? » again; an answer written since the last photo is marked new and
+ * spoken about first (« I added answers but she did not see them »).
+ */
+async function remember(c: HelpCtx, lines: Line[], practice = false): Promise<Line[]> {
+  const keys = lines.map((l) => itemKey(l.q, practice));
+  const fresh = await freshAt(c.session.id);
+  let q = admin
+    .from('observations')
+    .select('item_id, observed_answer, is_correct, created_at')
+    .eq('session_id', c.session.id)
+    .in('item_id', keys);
+  if (fresh) q = q.gt('created_at', fresh);
+  const { data, error } = await q
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    c.log('memory not read', error.message);
+    return lines;
+  }
+  const seen = (data ?? []) as { item_id: string; observed_answer: string | null; is_correct: boolean | null }[];
+  if (!seen.length) return lines;
+  let reused = 0;
+  const out = lines.map((l, i) => {
+    if (!l.a || l.status === 'empty') return l;
+    const same = seen.find((o) => o.item_id === keys[i] && answerKey(o.observed_answer) === answerKey(l.a) && o.is_correct !== null);
+    if (!same) return { ...l, isNew: true };
+    if (l.status === 'unsure' || l.status === 'open') {
+      reused++;
+      return { ...l, status: (same.is_correct ? 'right' : 'wrong') as LineStatus, c: Math.max(l.c, 0.9) };
+    }
+    return l;
+  });
+  c.log('memory', { reused, fresh: out.filter((l) => l.isNew).map((l) => `${l.q} -> ${l.a}`) });
+  return out;
 }
 
 type Spoken = { text: string; language: Lang; kind: Kind; annotations: unknown[] };
@@ -330,8 +396,9 @@ function photoOf(c: HelpCtx): () => Promise<string> {
 export async function checkPractice(c: HelpCtx): Promise<Outcome | null> {
   const practice = c.focus?.practice;
   if (!practice || !c.page?.readable || !c.page.exercises.length) return null;
-  const lines = await practiceLines(practice, c.page.exercises, c.grade, c.log);
-  if (!lines) return null;
+  const read = await practiceLines(practice, c.page.exercises, c.grade, c.log);
+  if (!read) return null;
+  const lines = await remember(c, read, true);
   const lang = languageFor(c);
   await confirm(lines, photoOf(c), c.grade, c.log);
   const allRight = lines.every((l) => l.status === 'right');
@@ -361,7 +428,8 @@ async function speakLines(
   const lang = languageFor(c);
   const V = VERDICT_TEXT[lang];
   const by = (st: LineStatus) => lines.filter((l) => l.status === st);
-  const [right, wrong, unsure, open, empty] = [by('right'), by('wrong'), by('unsure'), by('open'), by('empty')];
+  const newFirst = (a: Line, b: Line) => Number(!!b.isNew) - Number(!!a.isNew);
+  const [right, wrong, unsure, open, empty] = [by('right'), by('wrong').sort(newFirst), by('unsure').sort(newFirst), by('open'), by('empty')];
   const ticks = right.filter((l) => l.r).map((l) => ({ shape: 'tick', region: l.r, color: '#5BD68A' }));
   const prefix = right.length ? `${V.rightPrefix(right.length)} ` : '';
   const name = meta.label ?? String(meta.index);
@@ -414,7 +482,7 @@ async function speakLines(
         household_id: c.session.household_id,
         session_id: c.session.id,
         snapshot_id: c.snap!.id,
-        item_id: `${meta.practice ? 'practice: ' : ''}${l.q.toLowerCase().replace(/\s+/g, ' ').trim()}`,
+        item_id: itemKey(l.q, meta.practice),
         observed_answer: l.a,
         is_correct: l.status === 'right',
         confidence: l.c,
@@ -424,6 +492,40 @@ async function speakLines(
     if (error) c.log('observations not saved', error.message);
   }
   return { text, language: lang, kind, annotations };
+}
+
+/**
+ * « Solution »: only when the parent turned it on (households.solution_enabled, checked here, not only on the Board).
+ * The right answers are written in chalk on the Board, her mistakes circled, and Silia explains the first one.
+ */
+async function runSolution(c: HelpCtx, e: PageExercise): Promise<{ text: string; language: Lang; kind: Kind; annotations: unknown[] }> {
+  const lang = languageFor(c);
+  const V = VERDICT_TEXT[lang];
+  const { data: home } = await admin.from('households').select('solution_enabled').eq('id', c.session.household_id).maybeSingle();
+  if ((home as { solution_enabled?: boolean } | null)?.solution_enabled !== true) {
+    c.log('solution refused: setting off');
+    return { text: V.solutionOff, language: lang, kind: 'encourage', annotations: [] };
+  }
+  const text = c.snap ? () => pageText(c.snap!, (p) => p) : undefined;
+  const { lines, explain } = await solutionLines(await zoomed(c, e), lang, c.grade, text);
+  const annotations = [
+    ...lines.filter((l) => l.status === 'wrong' && l.r).map((l) => ({ shape: 'circle', region: l.r, color: '#FF5A5A' })),
+    ...lines.filter((l) => l.status === 'right' && l.r).map((l) => ({ shape: 'tick', region: l.r, color: '#5BD68A' })),
+  ];
+  const next = c.page?.exercises.filter((x) => x.n > e.n).sort((a, b) => a.n - b.n)[0];
+  c.log('solution', { exercise: exName(e), lines: lines.map((l) => `${l.q} -> ${l.a ?? '-'} [${l.status}] = ${l.expected ?? '?'}`) });
+  await bc(c, 'exercise.result', {
+    ...(c.snap ? { snapshot_id: c.snap.id } : {}),
+    exercise_index: e.n,
+    title: e.title,
+    ...(e.instr ? { instr: e.instr } : {}),
+    ...(e.label ? { label: e.label } : {}),
+    mode: 'solution',
+    lines: lines.map((l) => ({ q: itemLabel(l.q), a: l.a, status: l.status, ...(l.expected ? { solution: l.expected } : {}) })),
+    // Done with this one: the Board offers the next exercise of the page.
+    ...(next ? { next: { index: next.n, title: next.title, ...(next.label ? { label: next.label } : {}) } } : {}),
+  });
+  return { text: `${V.solution}${explain ? ` ${explain}` : ''}`, language: lang, kind: 'explain', annotations };
 }
 
 // ---------- voice: understanding and follow-ups ----------
@@ -537,7 +639,7 @@ export async function execute(
     case 'no_photo':
     case 'unreadable':
     case 'no_exercise': {
-      const text = d.do === 'no_photo' ? T.noPhoto : d.do === 'unreadable' ? T.unreadable : T.noExercise;
+      const text = d.do === 'no_photo' ? T.noPhoto : d.do === 'unreadable' ? (d.why === 'hand' ? T.hand : T.unreadable) : T.noExercise;
       await say(c, text, lang, 'encourage');
       return { done: d.do, text, language: lang };
     }
@@ -604,6 +706,11 @@ export async function execute(
         });
         await say(c, text || practice.title, language, 'explain', { exercise: d.exercise, action: d.action });
         return { done: d.do, text, language, exercise: d.exercise.n, action: d.action };
+      }
+      if (d.action === 'solution') {
+        const v = await runSolution(c, d.exercise);
+        await say(c, v.text, v.language, v.kind, { exercise: d.exercise, action: d.action, annotations: v.annotations });
+        return { done: d.do, text: v.text, language: v.language, exercise: d.exercise.n, action: d.action };
       }
       if (d.action === 'correct') {
         const v = await runVerdict(c, d.exercise);

@@ -6,8 +6,8 @@
 import { westernDigits } from './arithmetic.ts';
 import type { PageContext, PageExercise } from './page.ts';
 
-export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar';
-export const HELP_ACTIONS: HelpAction[] = ['explain', 'solve', 'correct', 'similar'];
+export type HelpAction = 'explain' | 'solve' | 'correct' | 'similar' | 'solution';
+export const HELP_ACTIONS: HelpAction[] = ['explain', 'solve', 'correct', 'similar', 'solution'];
 
 export interface Intent {
   /** select = an exercise named without saying what to do; choose = "another exercise" / "which ones are there". */
@@ -71,6 +71,7 @@ const ACTION_PATTERNS: Record<HelpAction, RegExp> = {
   solve: /\b(resou\w*|resoud\w*|resolv\w*|solve\w*|on (le |la )?fai[ts]|faisons|let s do|work on|help me (do|with))\b|(^|\s)(نحل\S*|لنحل\S*|حل|حلي|حليه|حليها|ساعديني)(\s|$)/,
   similar: /\b(similaire\w*|(exercice|un) pareil\w*|pareil\w* (exercice|a celui)|semblable\w*|un autre (exercice|comme)|encore un|entrain\w*|similar|another one|more practice|practice)\b|(^|\s)(مشابه\S*|بحالو|تمرين (آخر|اخر)|زيديني|زدني)(\s|$)/,
   correct: /\b(corrig\w*|correct\w*|verifi\w*|check\w*|c est (juste|bon)|is it (right|correct))\b|(^|\s)(صحح\S*|يصحح\S*|تحقق\S*|راجع\S*)(\s|$)/,
+  solution: /\b(solutions?|bonnes? reponses?|donne(z)? (moi )?(la|les) reponses?|the answers?|right answers?)\b|(^|\s)(الحل|الحلول)(\s|$)/,
 };
 
 const ORDINALS: [RegExp, number][] = [

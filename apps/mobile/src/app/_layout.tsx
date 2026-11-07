@@ -11,6 +11,8 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const hydrated = useAppStore((s) => s.hydrated);
   const reloadKey = useAppStore((s) => s.reloadKey);
+  // A new app language remounts every screen (texts are translated while rendering).
+  const appLang = useAppStore((s) => s.appLang);
 
   useEffect(() => {
     if (hydrated) SplashScreen.hideAsync();
@@ -21,7 +23,7 @@ export default function RootLayout() {
   return (
     <>
       <StatusBar style="light" />
-      <Stack key={reloadKey} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
+      <Stack key={`${reloadKey}-${appLang}`} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
     </>
   );
 }

@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppRole, DeviceRole } from '@hc/shared';
 import { create } from 'zustand';
+
+import type { AppLangSetting } from './i18n';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 export interface PairedDevice {
@@ -19,6 +21,9 @@ interface AppStore {
   device: PairedDevice | null;
   /** Board: text only, no voice at all. */
   muted: boolean;
+  /** Language of the app's own texts on this device ('system' = the device's language). */
+  appLang: AppLangSetting;
+  setAppLang: (lang: AppLangSetting) => void;
   setMuted: (muted: boolean) => void;
   setRole: (role: AppRole | null) => void;
   setDevice: (device: PairedDevice | null) => void;
@@ -35,6 +40,8 @@ export const useAppStore = create<AppStore>()(
       role: null,
       device: null,
       muted: false,
+      appLang: 'system',
+      setAppLang: (appLang) => set({ appLang }),
       setMuted: (muted) => set({ muted }),
       setRole: (role) => set({ role }),
       setDevice: (device) => set({ device }),
@@ -45,7 +52,7 @@ export const useAppStore = create<AppStore>()(
     {
       name: 'kids-companion-app',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: ({ role, device, muted }) => ({ role, device, muted }),
+      partialize: ({ role, device, muted, appLang }) => ({ role, device, muted, appLang }),
       onRehydrateStorage: () => () => useAppStore.setState({ hydrated: true }),
     },
   ),

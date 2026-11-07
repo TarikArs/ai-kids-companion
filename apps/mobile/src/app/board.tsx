@@ -2,6 +2,8 @@ import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction, SessionEven
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Caveat_600SemiBold, Caveat_700Bold, useFonts } from '@expo-google-fonts/caveat';
 import { useKeepAwake } from 'expo-keep-awake';
+import { router, useLocalSearchParams } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +23,7 @@ import { colors, radius, space } from '@/lib/theme';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { useUnpair } from '@/lib/use-unpair';
 import { onVoiceIssue, playVoice, stopVoice } from '@/lib/voice';
+import { applyFamilyLang, t } from '@/lib/i18n';
 
 interface Photo {
   id: string;
@@ -59,36 +62,50 @@ const CHOICE_STATUS: Record<ExerciseChoice['status'], string> = {
 /** "532 − 178 = 354", "604 − 259 · à revoir", "700 − 465 · pas encore fait". */
 function lineText(l: ResultLine): string {
   const calc = /\d/.test(l.q) && /[-+−×x÷:*/]/.test(l.q);
+  // « Solution »: the right answer in chalk; her wrong answer stays visible before the arrow.
+  if (l.solution && l.status !== 'right') return l.status === 'wrong' ? `${l.q} : ${l.a ?? ''} → ${l.solution}` : `${l.q} → ${l.solution}`;
   switch (l.status) {
     case 'right':
       return `${l.q}${calc ? ' = ' : ' : '}${l.a ?? ''}`;
     case 'wrong':
-      return `${l.q} : ${l.a ?? ''} · à revoir`;
+      return t('{q} : {a} · à revoir', { q: l.q, a: l.a ?? '' });
     case 'unsure':
-      return `${l.q} · je lis « ${l.a ?? ''} » ?`;
+      return t('{q} · je lis « {a} » ?', { q: l.q, a: l.a ?? '' });
     case 'open':
-      return `${l.q} · dis-moi ta réponse`;
+      return t('{q} · dis-moi ta réponse', { q: l.q });
     default:
-      return `${l.q} · pas encore fait`;
+      return t('{q} · pas encore fait', { q: l.q });
   }
 }
 
 export default function Board() {
   useKeepAwake();
+  /**
+   * « Un seul téléphone »: the Camera phone opens this screen after a photo (?solo=1&photo=<snapshot id>), sideways,
+   * already started, then « Retour à la caméra ». No pairing, no TV.
+   */
+  const params = useLocalSearchParams<{ solo?: string; photo?: string }>();
+  const solo = params.solo === '1';
   const device = useAppStore((s) => s.device);
   const reload = useAppStore((s) => s.reload);
   const unpair = useUnpair();
   const { width, height } = useWindowDimensions();
   const landscape = width >= height;
+  /** A phone (one-phone mode, or a phone used as Board): smaller text and spacing so everything fits. */
+  const compact = Math.min(width, height) < 500;
+  /** Board width in landscape, in pixels (a percentage basis collapsed on Android). */
+  const boardWidth = landscape ? Math.round(width * (compact ? 0.62 : 0.68)) : undefined;
   /** Chalk handwriting for the board. */
   const [fontsLoaded] = useFonts({ Caveat_600SemiBold, Caveat_700Bold });
 
   /** Parent setting (Espace parent → Voix de Silia). Off = text only, and the server sends no audio at all. */
   const [voiceOn, setVoiceOn] = useState(true);
+  /** Parent setting « Solution »: the Solution button on the Board. */
+  const [solutionOn, setSolutionOn] = useState(false);
   const mutedRef = useRef(false);
   mutedRef.current = !voiceOn;
 
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(solo);
   const [session, setSession] = useState<HomeworkSession | null>(null);
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -116,13 +133,14 @@ export default function Board() {
 
   /** Tutor messages already shown (live or by the fallback poll). */
   const shownRef = useRef<Set<string>>(new Set());
-  const pollBaselineRef = useRef<string | null>(null);
+  // Solo: the answer may arrive before the live channel is ready, so the poll may show any recent message.
+  const pollBaselineRef = useRef<string | null>(solo ? '' : null);
   const showMessageRef = useRef<(p: SessionEvents['tutor.say']) => void>(() => undefined);
   /** Parent changed a setting (language, voice): refresh what depends on it. */
   const settingsChangedRef = useRef<() => void>(() => undefined);
   /** The bubble still shows the greeting (nothing said yet). */
   const greetingShownRef = useRef(true);
-  const startedRef = useRef(false);
+  const startedRef = useRef(solo);
   const lastTextRef = useRef(GREETING);
   const lastVoiceRef = useRef<{ language: string; audioUrl?: string; phrase?: string }>({ language: 'fr' });
   const speakingRef = useRef(false);
@@ -140,6 +158,23 @@ export default function Board() {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const lang = () => forcedLangRef.current ?? lastVoiceRef.current.language ?? 'fr';
+
+  // Solo: sideways while this screen is open; the photo just taken is shown at once with the scan.
+  useEffect(() => {
+    if (!solo) return;
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => undefined);
+    // No unlock on leaving: the Camera locks itself upright when it opens.
+  }, [solo]);
+
+  /** Solo: back to the Camera (portrait). */
+  function backToCamera() {
+    stopVoice();
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+      .catch(() => undefined)
+      .finally(() => {
+        router.replace('/camera'); // the Camera keeps itself upright
+      });
+  }
 
   // Safety net: never stay "thinking" forever. After 25 s Silia says she could not read it.
   useEffect(() => {
@@ -208,6 +243,17 @@ export default function Board() {
     photoIdRef.current = snap.id;
     setPhoto({ id: snap.id, uri: signed.signedUrl, width: snap.width ?? 1280, height: snap.height ?? 960 });
   }, []);
+
+  // Solo: the photo the Camera just took, with the scan, before Silia's answer arrives.
+  useEffect(() => {
+    if (!solo || !params.photo) return;
+    void loadPhoto(params.photo);
+    setScanning(true);
+    setBubble(LOOKING[lang()] ?? LOOKING.fr);
+    greetingShownRef.current = false;
+    setMood('thinking');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solo, params.photo, loadPhoto]);
 
   // Follow the household's open session (a new one starts when the Camera taps "Commencer"), and the parent's settings.
   useEffect(() => {
@@ -282,7 +328,18 @@ export default function Board() {
     let cancelled = false;
 
     (async () => {
-      // A refresh starts empty: no old photo, exercise or practice; only what Lina asks from now on.
+      // A refresh starts empty: no old photo, exercise or practice; only what Lina asks from now on. The server forgets
+      // too: no active exercise, and her earlier answers are not reused (fresh_at). Not in solo: there the Board opens
+      // after every photo, and the exercise must be kept.
+      if (!solo) {
+        supabase
+          .from('homework_sessions')
+          .update({ focus: null, pending_action: null, fresh_at: bootAtRef.current })
+          .eq('id', sessionId)
+          .then(({ error }) => {
+            if (error) log('board', `fresh start not saved: ${error.message}`);
+          });
+      }
       supabase
         .from('homework_sessions')
         .select('rotation')
@@ -438,8 +495,11 @@ export default function Board() {
   // The voice setting and the tutor's language: the parent's choice, or (auto) the last language Silia spoke.
   const loadLanguage = useCallback(async () => {
     if (!device) return 'fr';
-    const { data: home } = await supabase.from('households').select('voice_enabled').eq('id', device.householdId).maybeSingle();
+    const { data: home } = await supabase.from('households').select('voice_enabled, solution_enabled, app_lang').eq('id', device.householdId).maybeSingle();
     if (home) {
+      // The parent's « Langue de l'app » applies to the Board too (the screens reload in that language).
+      applyFamilyLang((home as { app_lang?: string }).app_lang);
+      setSolutionOn((home as { solution_enabled?: boolean }).solution_enabled === true);
       const on = (home as { voice_enabled?: boolean }).voice_enabled !== false;
       setVoiceOn((cur) => {
         if (cur !== on && !on) stopVoice();
@@ -605,7 +665,7 @@ export default function Board() {
   const suggestedChoice = choices.find((c) => c.index === suggested) ?? choices[0];
   const guide = result?.mode === 'guide';
   const rtl = bubbleLang === 'ar' || bubbleLang === 'fus';
-  const statusLabel = !session ? 'En attente de la caméra' : session.status === 'paused' ? 'En pause' : scanning ? 'Je regarde ta page…' : 'Devoirs en cours';
+  const statusLabel = t(!session ? 'En attente de la caméra' : session.status === 'paused' ? 'En pause' : scanning ? 'Je regarde ta page…' : 'Devoirs en cours');
   const statusColor = !session ? colors.muted : session.status === 'paused' || scanning ? colors.accent : colors.success;
   const next = result?.next;
   /** Handwriting on the chalkboard (Caveat). Arabic text uses the system font: Caveat has no Arabic letters. */
@@ -618,12 +678,12 @@ export default function Board() {
   // What the chalk column shows: the exercises to choose from, the checked exercise, the active one, or the invitation.
   const chalkNumber = choices.length ? null : result ? (result.label ?? String(result.exercise_index)) : focus ? exerciseName(focus) : null;
   const chalkTitle = choices.length
-    ? `Je vois ${choices.length} exercices`
-    : (result?.title ?? focus?.title ?? `Quand tu as fini, appuie sur « ${TUTOR_NAME}, regarde »`);
-  const chalkInstr = choices.length ? 'Lequel on commence ?' : result?.instr;
+    ? t('Je vois {n} exercices', { n: choices.length })
+    : (result?.title ?? focus?.title ?? t('Quand tu as fini, appuie sur « {name}, regarde »', { name: TUTOR_NAME }));
+  const chalkInstr = choices.length ? t('Lequel on commence ?') : result?.instr;
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={[styles.root, compact && styles.rootCompact]}>
       {/* top bar: every button is an icon; the one focused with the remote opens with its label */}
       <View style={styles.header}>
         <Text style={styles.title}>{TUTOR_NAME}</Text>
@@ -639,43 +699,52 @@ export default function Board() {
         ) : null}
         <View style={{ flex: 1 }} />
         {(focus || result) && !choices.length ? (
-          <TopButton icon="copy" label="Exercice similaire" onPress={() => help(undefined, 'similar')} disabled={busy || !active} />
+          <TopButton icon="copy" label={t('Exercice similaire')} onPress={() => help(undefined, 'similar')} disabled={busy || !active} />
         ) : null}
-        <TopButton icon="speaker" label="Répéter" onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
+        {solutionOn && (focus || result) && !choices.length ? (
+          <TopButton icon="key" label={t('Solution')} onPress={() => help(undefined, 'solution')} disabled={busy || !active} />
+        ) : null}
+        <TopButton icon="speaker" label={t('Répéter')} onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
+        {solo ? (
+          <TopButton icon="camera" label={t('Retour à la caméra')} tone="primary" showLabel onPress={backToCamera} />
+        ) : (
+        <>
         <TopButton
           icon="eye"
-          label={`${TUTOR_NAME}, regarde`}
+          label={t('{name}, regarde', { name: TUTOR_NAME })}
           tone={choices.length ? 'normal' : 'primary'}
           onPress={lookNow}
           loading={busy && scanning}
           disabled={!active}
         />
         {choices.length && suggestedChoice ? (
-          <TopButton icon="check" label={`Oui, le ${exerciseName(suggestedChoice)}`} tone="primary" showLabel onPress={() => help(suggestedChoice)} />
+          <TopButton icon="check" label={t('Oui, le {ex}', { ex: exerciseName(suggestedChoice) })} tone="primary" showLabel onPress={() => help(suggestedChoice)} />
         ) : null}
         <View style={styles.separator} />
         {Platform.OS === 'web' ? (
-          <TopButton icon="expand" label="Plein écran" tone="quiet" onPress={() => (globalThis as any).document?.documentElement?.requestFullscreen?.()} />
+          <TopButton icon="expand" label={t('Plein écran')} tone="quiet" onPress={() => (globalThis as any).document?.documentElement?.requestFullscreen?.()} />
         ) : null}
-        <TopButton icon="refresh" label="Recharger" tone="quiet" onPress={reload} />
-        <TopButton icon="unlink" label="Délier" tone="quiet" onPress={unpair} />
+        <TopButton icon="refresh" label={t('Recharger')} tone="quiet" onPress={reload} />
+        <TopButton icon="unlink" label={t('Délier')} tone="quiet" onPress={unpair} />
+        </>
+        )}
       </View>
 
-      <View style={[styles.main, { flexDirection: landscape ? 'row' : 'column' }]}>
+      <View style={[styles.main, compact && { gap: space.sm }, { flexDirection: landscape ? 'row' : 'column' }]}>
         {/* the board: the exercise in chalk on the left, the photo (or the practice exercise) on the right */}
-        <View style={[styles.wood, landscape ? { flexBasis: '70%', flexGrow: 0, flexShrink: 0 } : { flex: 2 }]}>
-          <View style={[styles.chalkboard, { flexDirection: landscape ? 'row' : 'column' }]}>
-            <View style={[styles.chalkCol, landscape ? { width: '38%' } : null]}>
+        <View style={[styles.wood, compact && styles.woodCompact, landscape ? { width: boardWidth } : { flex: 2 }]}>
+          <View style={[styles.chalkboard, compact && styles.chalkboardCompact, { flexDirection: landscape ? 'row' : 'column' }]}>
+            <View style={[styles.chalkCol, landscape && boardWidth ? { width: Math.round(boardWidth * 0.36) } : null]}>
               <View style={styles.chalkHead}>
                 {chalkNumber ? <Text style={[styles.chalkNumber, chalk(chalkNumber, true)]}>{chalkNumber}</Text> : null}
-                <Text style={[styles.chalkTitle, chalk(chalkTitle, true)]} numberOfLines={3}>
+                <Text style={[styles.chalkTitle, compact && styles.chalkTitleCompact, chalk(chalkTitle, true)]} numberOfLines={3}>
                   {chalkTitle}
                 </Text>
               </View>
               {chalkInstr ? (
                 <>
                   <View style={styles.chalkLine} />
-                  <Text style={[styles.chalkInstr, chalk(chalkInstr)]} numberOfLines={4}>
+                  <Text style={[styles.chalkInstr, compact && styles.chalkInstrCompact, chalk(chalkInstr)]} numberOfLines={4}>
                     {chalkInstr}
                   </Text>
                 </>
@@ -689,14 +758,14 @@ export default function Board() {
                       <Pressable
                         key={c.index}
                         accessibilityRole="button"
-                        accessibilityLabel={`Exercice ${exerciseName(c)} : ${c.title}`}
+                        accessibilityLabel={t('Exercice {ex} : {title}', { ex: exerciseName(c), title: c.title })}
                         onPress={() => help(c)}
                         style={[styles.chalkChoice, on && styles.chalkChoiceOn]}
                       >
                         <Text style={[styles.chalkItem, chalk(c.title, true), on && { color: '#7FD3FF' }]} numberOfLines={1}>
                           {exerciseName(c)} · {c.title}
                         </Text>
-                        <Text style={[styles.chalkSmall, chalk(CHOICE_STATUS[c.status])]}>{CHOICE_STATUS[c.status]}</Text>
+                        <Text style={[styles.chalkSmall, chalk(t(CHOICE_STATUS[c.status]))]}>{t(CHOICE_STATUS[c.status])}</Text>
                       </Pressable>
                     );
                   })}
@@ -707,7 +776,7 @@ export default function Board() {
                     <View key={i} style={styles.chalkRow}>
                       <Text style={[styles.chalkMark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
                       <Text
-                        style={[styles.chalkItem, chalk(l.q), l.status === 'wrong' && { color: WRONG_CHALK }, l.status === 'empty' && { opacity: 0.6 }]}
+                        style={[styles.chalkItem, compact && styles.chalkItemCompact, chalk(l.q), l.status === 'wrong' && { color: WRONG_CHALK }, l.status === 'empty' && { opacity: 0.6 }]}
                         numberOfLines={2}
                       >
                         {lineText(l)}
@@ -720,7 +789,7 @@ export default function Board() {
                       onPress={() => help({ index: next.index, title: next.title, status: 'empty', label: next.label }, 'correct')}
                       style={styles.chalkPill}
                     >
-                      <Text style={[styles.chalkItem, chalk('Exercice', true)]}>Exercice {next.label ?? next.index} →</Text>
+                      <Text style={[styles.chalkItem, chalk(t('Exercice {ex} →'), true)]}>{t('Exercice {ex} →', { ex: next.label ?? next.index })}</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -731,11 +800,11 @@ export default function Board() {
                 <View style={styles.chalkActions}>
                   {(['explain', 'solve'] as const).map((a) => (
                     <Pressable key={a} accessibilityRole="button" disabled={busy} onPress={() => help(undefined, a)} style={[styles.chalkPill, focus.action === a && styles.chalkPillOn]}>
-                      <Text style={[styles.chalkSmall, chalk(ACTION_LABEL[a], true)]}>{ACTION_LABEL[a]}</Text>
+                      <Text style={[styles.chalkSmall, chalk(t(ACTION_LABEL[a]), true)]}>{t(ACTION_LABEL[a])}</Text>
                     </Pressable>
                   ))}
-                  <Pressable accessibilityRole="button" accessibilityLabel="Changer d’exercice" onPress={() => help(undefined, 'choose')} style={styles.chalkPill}>
-                    <Text style={[styles.chalkSmall, chalk('Changer', true)]}>Changer</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t('Choisir un autre exercice')} onPress={() => help(undefined, 'choose')} style={styles.chalkPill}>
+                    <Text style={[styles.chalkSmall, chalk(t('Autre exercice'), true)]}>{t('Autre exercice')}</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -749,7 +818,7 @@ export default function Board() {
               ) : photo ? (
                 <>
                   <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={sessionRotation ?? 0} annotations={shown} scanning={scanning} />
-                  <Pressable accessibilityRole="button" accessibilityLabel="Tourner la page" onPress={rotate} style={[styles.rotate, practice ? { top: 56 } : null]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t('Tourner la page')} onPress={rotate} style={[styles.rotate, practice ? { top: 56 } : null]}>
                     <Text style={styles.rotateText}>↻</Text>
                   </Pressable>
                 </>
@@ -757,18 +826,18 @@ export default function Board() {
               {practice ? (
                 <View style={styles.boardTabs}>
                   <Pressable accessibilityRole="button" onPress={() => setPracticeView((v) => !v)} style={styles.boardTab}>
-                    <Text style={styles.boardTabText}>{practiceView ? 'Voir la photo' : 'Exercice similaire'}</Text>
+                    <Text style={styles.boardTabText}>{t(practiceView ? 'Voir la photo' : 'Exercice similaire')}</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Fermer l’exercice similaire"
+                    accessibilityLabel={t('Fermer l’exercice similaire')}
                     onPress={() => {
                       setPractice(null);
                       setPracticeView(true);
                     }}
                     style={styles.boardTab}
                   >
-                    <Text style={styles.boardTabText}>Fermer</Text>
+                    <Text style={styles.boardTabText}>{t('Fermer')}</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -777,15 +846,15 @@ export default function Board() {
         </View>
 
         {/* right: the answer field, then Silia with her speech bubble */}
-        <View style={[styles.side, { flex: 1 }]}>
+        <View style={[styles.side, compact && { gap: space.sm }, { flex: 1 }]}>
           {session && (focus || guide) && !choices.length ? (
             <View style={[styles.answer, guide && styles.answerGuide]}>
-              {guide ? <Text style={styles.cardCaption}>Ta réponse</Text> : null}
+              {guide ? <Text style={styles.cardCaption}>{t('Ta réponse')}</Text> : null}
               <View style={styles.answerRow}>
                 <TextInput
                   value={typed}
                   onChangeText={setTyped}
-                  placeholder="Écris ta réponse…"
+                  placeholder={t('Écris ta réponse…')}
                   placeholderTextColor={colors.muted}
                   returnKeyType="send"
                   onSubmitEditing={sendAnswer}
@@ -794,22 +863,22 @@ export default function Board() {
                 />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Envoyer ma réponse"
+                  accessibilityLabel={t('Envoyer ma réponse')}
                   onPress={sendAnswer}
                   disabled={!typed.trim()}
                   style={[styles.answerSend, !typed.trim() && { opacity: 0.5 }]}
                 >
-                  <Text style={styles.answerSendText}>Envoyer</Text>
+                  <Text style={styles.answerSendText}>{t('Envoyer')}</Text>
                 </Pressable>
               </View>
-              {guide ? <Text style={styles.hint}>ou dis-la à voix haute avec « Parler »</Text> : null}
+              {guide ? <Text style={styles.hint}>{t('ou dis-la à voix haute avec « Parler »')}</Text> : null}
             </View>
           ) : null}
 
           <View style={styles.avatarBox}>
             {/* what Silia says: a speech bubble coming out of her */}
-            <View style={styles.bubble}>
-              <Text style={[styles.bubbleText, rtl && styles.rtlText]}>{bubble}</Text>
+            <View style={[styles.bubble, compact && styles.bubbleCompact]}>
+              <Text style={[styles.bubbleText, rtl && styles.rtlText, compact && styles.bubbleTextCompact]}>{bubble}</Text>
               <View style={styles.bubbleTail} />
             </View>
             <View style={styles.avatarFit}>
@@ -823,7 +892,7 @@ export default function Board() {
       {!started ? (
         <View style={styles.startOverlay}>
           <Pressable accessibilityRole="button" onPress={start} style={styles.startButton} preferFocus>
-            <Text style={styles.startText}>Commencer les devoirs</Text>
+            <Text style={styles.startText}>{t('Commencer les devoirs')}</Text>
           </Pressable>
           <Text style={styles.startHint}>Active {TUTOR_NAME}, ta maîtresse.</Text>
         </View>
@@ -857,7 +926,7 @@ const styles = StyleSheet.create({
   main: { flex: 1, gap: space.md, minHeight: 0, minWidth: 0 },
   wood: { backgroundColor: '#A06A3F', borderRadius: radius.lg, padding: 12, minHeight: 0, minWidth: 0 },
   chalkboard: { flex: 1, backgroundColor: '#1F4A3D', borderRadius: 14, padding: space.md, paddingLeft: space.lg, gap: space.md, overflow: 'hidden' },
-  chalkCol: { gap: 8, minHeight: 0 },
+  chalkCol: { gap: 8, minHeight: 0, overflow: 'hidden' },
   chalkHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   chalkNumber: {
     minWidth: 40,
@@ -975,4 +1044,13 @@ const styles = StyleSheet.create({
   startButton: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 48, paddingVertical: 28 },
   startText: { color: colors.onAccent, fontSize: 30, fontWeight: '900' },
   startHint: { color: colors.muted, fontSize: 18 },
+  // compact (phone)
+  rootCompact: { padding: space.sm, paddingTop: 4, gap: 6 },
+  woodCompact: { padding: 6, borderRadius: 16 },
+  chalkboardCompact: { padding: space.sm, paddingLeft: space.md, gap: space.sm },
+  chalkTitleCompact: { fontSize: 26, lineHeight: 28 },
+  chalkInstrCompact: { fontSize: 20, lineHeight: 23 },
+  chalkItemCompact: { fontSize: 19, lineHeight: 22 },
+  bubbleCompact: { borderRadius: 18, paddingHorizontal: space.md, paddingVertical: 10, marginBottom: 14 },
+  bubbleTextCompact: { fontSize: 15, lineHeight: 20 },
 });
