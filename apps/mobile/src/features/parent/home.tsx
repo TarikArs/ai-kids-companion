@@ -72,6 +72,8 @@ type Sheet =
 
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short' });
 const longDate = (iso: string) => new Date(iso).toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'short' });
+/** The device's name, without the old automatic names (« Tableau », « Caméra ») that only repeated its role. */
+const deviceLabel = (d: { name: string | null }) => (d.name && !/^(tableau|caméra|camera|board)$/i.test(d.name.trim()) ? d.name.trim() : '');
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Parent space: two tabs. Accueil = start the homework, last session, devices. Réglages = everything else. */
@@ -122,6 +124,19 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
       .then(({ data }) => {
         if (data?.summary) setReport(data as { started_at: string; summary: SessionSummary });
       });
+    // No « Terminer » any more: the latest session is summed up here, once it has been idle for 20 min (the server checks).
+    supabase
+      .from('homework_sessions')
+      .select('id, started_at, summary')
+      .eq('household_id', household.id)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(async ({ data: last }) => {
+        if (!last) return; // the server returns the saved report when nothing new happened since
+        const { data: sum } = await supabase.functions.invoke('session-summary', { body: { session_id: last.id, quiet: true } });
+        if (sum && (sum as SessionSummary).parent_text) setReport({ started_at: last.started_at, summary: sum as SessionSummary });
+      });
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ''));
   }, [household.id]);
 
@@ -171,6 +186,13 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
     setBusy(false);
     if (e) return setError(await functionError(e));
     setPairCode(data as PairCode);
+  }
+
+  async function renameDevice(id: string, name: string) {
+    setSheet(null);
+    const { error: e } = await supabase.from('devices').update({ name: name.slice(0, 60) }).eq('id', id);
+    if (e) setError(e.message);
+    loadDevices();
   }
 
   async function revoke(id: string) {
@@ -246,7 +268,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
                 <HandCaption>{t('DERNIÈRE SÉANCE')}</HandCaption>
                 <View style={[styles.group, styles.pad]}>
                   <View style={styles.rowBetween}>
-                    <Text style={styles.rowTitle}>{capital(longDate(report.started_at))}</Text>
+                    <Text style={styles.rowTitle}>{capital(longDate(report.summary.last_at ?? report.started_at))}</Text>
                     <Text style={styles.sub}>{report.summary.minutes} min</Text>
                   </View>
                   <View style={styles.stats}>
@@ -272,7 +294,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
                     key={d.id}
                     first={i === 0}
                     icon={ROLE[d.role].icon}
-                    title={`${t(ROLE[d.role].title)}${d.name ? ` · ${d.name}` : ''}`}
+                    title={`${t(ROLE[d.role].title)}${deviceLabel(d) ? ` · ${deviceLabel(d)}` : ''}`}
                     sub={t('relié le {date}', { date: shortDate(d.created_at) })}
                     onPress={() => setSheet({ kind: 'device', device: d })}
                   />
@@ -289,26 +311,45 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
             <Text style={styles.pageTitle}>{t('Réglages')}</Text>
 
             {household.children.map((c) => {
-              const lang = LANGUAGES.find((l) => l.value === (c.tutor_language ?? 'auto')) ?? LANGUAGES[0];
               return (
                 <View key={c.id} style={{ gap: space.sm }}>
                   <HandCaption>{c.name.toUpperCase()}</HandCaption>
                   <View style={styles.group}>
                     <Row first icon="🎒" title={t('Classe')} value={t(GRADES.find((g) => g.value === (c.grade ?? 1))?.label ?? '')} onPress={() => setSheet({ kind: 'grade', child: c })} />
                     <Row icon="✏️" title={t('Prénom')} value={c.name} onPress={() => setSheet({ kind: 'name', child: c })} />
-                    <Row icon="🗣️" title={t('Langue de {name}', { name: TUTOR_NAME })} sub={t(lang.hint)} value={t(lang.label)} onPress={() => setSheet({ kind: 'lang', child: c })} />
                   </View>
                 </View>
               );
             })}
 
-            <HandCaption>{TUTOR_NAME.toUpperCase()}</HandCaption>
+            {/* one place for what Silia speaks, the app's own language, and whether she speaks aloud */}
+            <HandCaption>{t('Langues et voix')}</HandCaption>
             <View style={styles.group}>
+              {household.children.map((c, i) => {
+                const lang = LANGUAGES.find((l) => l.value === (c.tutor_language ?? 'auto')) ?? LANGUAGES[0];
+                return (
+                  <Row
+                    key={c.id}
+                    first={i === 0}
+                    icon="🗣️"
+                    title={household.children.length > 1 ? `${t('Langue de {name}', { name: TUTOR_NAME })} · ${c.name}` : t('Langue de {name}', { name: TUTOR_NAME })}
+                    sub={t(lang.hint)}
+                    value={t(lang.label)}
+                    onPress={() => setSheet({ kind: 'lang', child: c })}
+                  />
+                );
+              })}
               <Row
-                first
+                icon="🌐"
+                title={t("Langue de l'app")}
+                sub={t('Boutons et écrans · tous les appareils de la famille')}
+                value={appLangSetting === 'system' ? t('Téléphone') : APP_LANGS.find((l) => l.value === appLangSetting)?.label}
+                onPress={() => setSheet({ kind: 'appLang' })}
+              />
+              <Row
                 icon="🔊"
-                title={t('Voix de {name}', { name: TUTOR_NAME })}
-                sub={t(voiceOn === false ? 'Coupée : texte seulement, aucun crédit ElevenLabs' : 'Activée : les phrases déjà dites sont gratuites')}
+                title={t('{name} parle à voix haute', { name: TUTOR_NAME })}
+                sub={t(voiceOn === false ? 'Coupé : elle écrit seulement au Tableau' : 'Activé : les phrases déjà dites sont gratuites')}
                 right={voiceOn === null ? null : <Switch on={voiceOn} onChange={(on) => setHouseholdFlag('voice_enabled', on)} />}
               />
             </View>
@@ -327,17 +368,6 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
                 title={t('Solution')}
                 sub={t('Un bouton « Solution » sur le Tableau : {name} écrit les bonnes réponses et explique', { name: TUTOR_NAME })}
                 right={solutionOn === null ? null : <Switch on={solutionOn} onChange={(on) => setHouseholdFlag('solution_enabled', on)} />}
-              />
-            </View>
-
-            <HandCaption>{t('APPLICATION')}</HandCaption>
-            <View style={styles.group}>
-              <Row
-                first
-                icon="🌐"
-                title={t("Langue de l'app")}
-                value={appLangSetting === 'system' ? t('Langue du téléphone') : APP_LANGS.find((l) => l.value === appLangSetting)?.label}
-                onPress={() => setSheet({ kind: 'appLang' })}
               />
             </View>
 
@@ -387,8 +417,15 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
           <View style={{ gap: space.md }}>
             <Text style={styles.sheetTitle}>
               {ROLE[sheet.device.role].icon} {t(ROLE[sheet.device.role].title)}
-              {sheet.device.name ? ` · ${sheet.device.name}` : ''}
+              {deviceLabel(sheet.device) ? ` · ${deviceLabel(sheet.device)}` : ''}
             </Text>
+            <NameEdit
+              key={sheet.device.id}
+              title={t("Nom de l'appareil")}
+              placeholder={t('TV du salon')}
+              name={deviceLabel(sheet.device)}
+              onSave={(name) => renameDevice(sheet.device.id, name)}
+            />
             <Text style={styles.sub}>{t('Relié le {date}. Retiré, il devra être relié à nouveau avec un code.', { date: shortDate(sheet.device.created_at) })}</Text>
             <Button label={t('Retirer cet appareil')} variant="secondary" onPress={() => revoke(sheet.device.id)} />
           </View>
@@ -551,13 +588,13 @@ function Choices<T extends string | number>({
   );
 }
 
-function NameEdit({ name, onSave }: { name: string; onSave: (name: string) => void }) {
+function NameEdit({ name, onSave, title, placeholder }: { name: string; onSave: (name: string) => void; title?: string; placeholder?: string }) {
   const [value, setValue] = useState(name);
   const ok = value.trim().length > 0 && value.trim() !== name;
   return (
     <View style={{ gap: space.md }}>
-      <Text style={styles.sheetTitle}>{t('Prénom')}</Text>
-      <TextInput value={value} onChangeText={setValue} autoFocus maxLength={40} style={styles.input} placeholder={t('Prénom')} placeholderTextColor={paper.inkFaint} />
+      <Text style={styles.sheetTitle}>{title ?? t('Prénom')}</Text>
+      <TextInput value={value} onChangeText={setValue} autoFocus={!title} maxLength={40} style={styles.input} placeholder={placeholder ?? t('Prénom')} placeholderTextColor={paper.inkFaint} />
       <Button label={t('Enregistrer')} onPress={() => ok && onSave(value.trim())} disabled={!ok} />
     </View>
   );

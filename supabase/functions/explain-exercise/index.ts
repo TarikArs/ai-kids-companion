@@ -32,13 +32,13 @@ Deno.serve(async (req) => {
 
   const [user, { data: session }] = await Promise.all([
     getCaller(req),
-    admin.from('homework_sessions').select('id, household_id, children(tutor_language, grade)').eq('id', session_id).maybeSingle(),
+    admin.from('homework_sessions').select('id, household_id, children(name, tutor_language, grade)').eq('id', session_id).maybeSingle(),
   ]);
   if (!user) return json({ error: 'Sign in first' }, 401);
   if (!session) return json({ error: 'Session not found' }, 404);
   if (!(await isHouseholdMember(user.id, session.household_id))) return json({ error: 'Not allowed' }, 403);
 
-  const child = session.children as { tutor_language?: string; grade?: number } | null;
+  const child = session.children as { name?: string; tutor_language?: string; grade?: number } | null;
   const gradeNum = Number(child?.grade ?? 1);
   const topic = `session:${session.id}`;
   const turn = parseTurn((body as { turn?: unknown }).turn);
@@ -55,6 +55,7 @@ Deno.serve(async (req) => {
       topic,
       turn,
       grade,
+      childName: child?.name?.trim() || null,
       advanced: gradeNum >= 4,
       setting: child?.tutor_language,
       snap,

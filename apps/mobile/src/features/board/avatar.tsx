@@ -1,21 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
-import Svg, { Circle, Ellipse, G, Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Ellipse, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 // Animated cartoon avatar (placeholder until the Rive character exists).
 // One animation loop computes a "pose" ~30 times per second; the SVG is drawn from that pose.
 // Behaviours: breathing, blinking, glancing, walking, glasses push, wave, hop, peeking at the board,
-// thinking (hand on chin), speaking (mouth + nods + hand), praise (jumps + stars), hint/explain (points at the board).
+// thinking (taps her chin, a thought cloud with « ? »), speaking (mouth + nods + hand), praise (jumps + stars),
+// hint/explain (points at the board), laugh (eyes closed, shakes, « ha ha »), grumpy (a playful pout: arms crossed,
+// frowning brows, puffed cheeks; never scary), nudge (« tu es là ? »: hand at her ear, leans in, taps her foot), and idle
+// habits: takes her glasses off, wipes them and puts them back; giggles.
 
 export type AvatarMood = 'idle' | 'thinking' | 'speaking' | 'listening';
 export interface AvatarReaction {
-  type: 'praise' | 'hint' | 'explain';
+  type: 'praise' | 'hint' | 'explain' | 'laugh' | 'grumpy' | 'nudge';
   at: number;
 }
 
 type Vec = [number, number];
-type MouthMode = 'smile' | 'open' | 'o' | 'grin';
-type Fidget = 'glasses' | 'wave' | 'hop' | 'peek';
+type MouthMode = 'smile' | 'open' | 'o' | 'grin' | 'flat';
+type Fidget = 'glasses' | 'wave' | 'hop' | 'peek' | 'glassesOff' | 'giggle';
+type Eyes = 'open' | 'happy' | 'squint';
 
 interface Pose {
   x: number;
@@ -35,6 +39,17 @@ interface Pose {
   confetti: number; // -1 = none, else 0..1 age
   dots: number; // thinking dots shown (0..3)
   cheeks: number;
+  /** Glasses taken off: where they are, from their place on the nose. */
+  glassesOff: Vec;
+  eyes: Eyes;
+  /** Eyebrows turned in (grumpy), degrees. */
+  browAngle: number;
+  /** « ? » in the thought cloud (0..1). */
+  thinkMark: number;
+  /** « ha ha » age (-1 = none). */
+  laugh: number;
+  /** Little puffs around the head when grumpy (0..1). */
+  puffs: number;
 }
 
 const SKIN = '#F2C29B';
@@ -72,6 +87,12 @@ const INITIAL: Pose = {
   confetti: -1,
   dots: 0,
   cheeks: 0.55,
+  glassesOff: [0, 0],
+  eyes: 'open',
+  browAngle: 0,
+  thinkMark: 0,
+  laugh: -1,
+  puffs: 0,
 };
 
 /** Outfit colour per tutor language: the child sees at a glance which language she speaks. */
@@ -128,7 +149,7 @@ export function Avatar({
       walkTarget: 0,
       walkPhase: 0,
     };
-    const DUR: Record<Fidget, number> = { glasses: 1.5, wave: 1.9, hop: 0.9, peek: 2.2 };
+    const DUR: Record<Fidget, number> = { glasses: 1.5, wave: 1.9, hop: 0.9, peek: 2.2, glassesOff: 3.6, giggle: 1.4 };
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -144,7 +165,7 @@ export function Avatar({
       // Reaction from the tutor (praise / hint / explain), with its own duration.
       let r = reactionRef.current;
       const rAge = r ? t - r.start : 0;
-      const rDur = r?.type === 'praise' ? 1.8 : r?.type === 'hint' ? 2.8 : 6;
+      const rDur = r?.type === 'praise' ? 1.8 : r?.type === 'hint' ? 2.8 : r?.type === 'laugh' ? 2.4 : r?.type === 'grumpy' ? 3.2 : r?.type === 'nudge' ? 2.8 : 6;
       if (r && rAge > rDur) {
         reactionRef.current = null;
         r = null;
@@ -174,7 +195,7 @@ export function Avatar({
 
       // Idle habits: glasses, wave, hop, peek. Walking a few steps now and then.
       const idle = m === 'idle' && !r;
-      if (idle && !s.fidget && t > s.nextFidget) s.fidget = { type: pick<Fidget>(['glasses', 'wave', 'hop', 'peek', 'glasses']), start: t };
+      if (idle && !s.fidget && t > s.nextFidget) s.fidget = { type: pick<Fidget>(['glasses', 'wave', 'hop', 'peek', 'glassesOff', 'glassesOff', 'giggle']), start: t };
       if (s.fidget && (t - s.fidget.start > DUR[s.fidget.type] || !idle)) {
         s.fidget = null;
         s.nextFidget = t + rand(6, 13);
@@ -206,6 +227,13 @@ export function Avatar({
       let bodyY = Math.sin((t * 2 * Math.PI) / 3.4) * 2.5; // breathing
       let confetti = -1;
       let cheeks = 0.55;
+      let glassesOff: Vec = [0, 0];
+      let eyes: Eyes = 'open';
+      let browAngle = 0;
+      let thinkMark = 0;
+      let laugh = -1;
+      let puffs = 0;
+      let footTap = 0;
 
       if (walking) {
         bodyY -= Math.abs(Math.sin(s.walkPhase)) * 3;
@@ -213,11 +241,14 @@ export function Avatar({
       }
 
       if (m === 'thinking') {
-        rHand = [268, 322];
-        tilt = -6 + Math.sin(t * 1.5) * 1.5;
-        mouthMode = 'o';
-        brow = 3;
+        // Clearly thinking: finger tapping her chin, eyes up, head swaying, a thought cloud with « ? ».
+        rHand = [270, 318 + Math.max(0, Math.sin(t * 7)) * 7];
+        tilt = -7 + Math.sin(t * 1.2) * 3;
+        mouthMode = Math.sin(t * 0.9) > 0.3 ? 'o' : 'flat';
+        brow = 5;
+        look = Math.sin(t * 0.7) > 0 ? [-6, -8] : [5, -8];
         glassesY = Math.sin(t * 0.8) > 0.9 ? -3 : 0;
+        thinkMark = 1;
       } else if (m === 'speaking') {
         mouthMode = 'open';
         mouthOpen = 0.2 + 0.7 * Math.abs(Math.sin(t * 13) * Math.sin(t * 3.7 + 1));
@@ -249,6 +280,21 @@ export function Avatar({
         look = [-7, 2];
         tilt = -7;
         brow = 3;
+      } else if (f?.type === 'glassesOff') {
+        // Takes her glasses off, wipes them on her dress, puts them back.
+        const down: Vec = [36, 118];
+        const g = fp < 0.18 ? 0 : fp < 0.33 ? (fp - 0.18) / 0.15 : fp < 0.72 ? 1 : fp < 0.86 ? 1 - (fp - 0.72) / 0.14 : 0;
+        const wipe = fp >= 0.33 && fp < 0.72 ? Math.sin(t * 15) * 10 : 0;
+        glassesOff = [down[0] * g + wipe, down[1] * g];
+        rHand = fp < 0.92 ? [302 + glassesOff[0], 212 + glassesOff[1]] : REST_R;
+        if (g > 0.5) eyes = 'squint';
+        look = [0, 1];
+        mouthMode = fp > 0.86 ? 'grin' : 'smile';
+      } else if (f?.type === 'giggle') {
+        eyes = 'happy';
+        mouthMode = 'grin';
+        bodyY += Math.sin(t * 28) * 2.5;
+        cheeks = 0.8;
       }
 
       if (r?.type === 'praise') {
@@ -261,6 +307,37 @@ export function Avatar({
         cheeks = 0.85;
         confetti = rp;
         look = [0, 0];
+      } else if (r?.type === 'laugh') {
+        // Laughs: eyes closed, shaking, hands on her tummy, « ha ha ».
+        eyes = 'happy';
+        mouthMode = 'grin';
+        bodyY += Math.sin(t * 30) * 3.5 - bump(rp) * 6;
+        tilt += Math.sin(t * 18) * 4;
+        lHand = [205, 432];
+        rHand = [298, 432];
+        pointer = 160;
+        cheeks = 0.95;
+        laugh = rp;
+      } else if (r?.type === 'grumpy') {
+        // A playful pout (too many mistakes): arms crossed, frowning, puffed cheeks, a small head shake. Never scary.
+        lHand = [292, 410];
+        rHand = [208, 404];
+        pointer = 25;
+        browAngle = 14;
+        brow = -2;
+        mouthMode = 'flat';
+        cheeks = 1;
+        tilt = rp < 0.5 ? Math.sin(t * 9) * 6 : -4;
+        look = rp < 0.5 ? [0, 0] : [-6, 3];
+        puffs = rp < 0.7 ? 1 : 0;
+      } else if (r?.type === 'nudge') {
+        // « Tu es là ? »: leans in, hand at her ear, eyebrows up, taps her foot.
+        rHand = [364, 226];
+        tilt = 10;
+        brow = 7;
+        look = [0, 1];
+        mouthMode = 'o';
+        footTap = Math.max(0, Math.sin(t * 12)) * 9;
       } else if (r?.type === 'hint' || r?.type === 'explain') {
         lHand = [95, 292];
         pointer = -135 + Math.sin(t * (r.type === 'hint' ? 10 : 5)) * 5; // taps the board
@@ -285,9 +362,16 @@ export function Avatar({
       p.legL = walking ? Math.max(0, Math.sin(s.walkPhase)) * 10 : 0;
       p.legR = walking ? Math.max(0, -Math.sin(s.walkPhase)) * 10 : 0;
       p.confetti = confetti;
-      p.dots = m === 'thinking' ? Math.floor((t * 2.5) % 4) : 0;
+      p.dots = m === 'thinking' ? Math.min(3, Math.floor((t * 2.5) % 5)) : 0;
+      p.glassesOff = approachVec(p.glassesOff, glassesOff, k);
+      p.eyes = eyes;
+      p.browAngle = approach(p.browAngle, browAngle, k);
+      p.thinkMark = approach(p.thinkMark, thinkMark, k);
+      p.laugh = laugh;
+      p.puffs = approach(p.puffs, puffs, k);
+      if (footTap) p.legR = footTap;
 
-      setPose({ ...p, look: [...p.look] as Vec, lHand: [...p.lHand] as Vec, rHand: [...p.rHand] as Vec });
+      setPose({ ...p, look: [...p.look] as Vec, lHand: [...p.lHand] as Vec, rHand: [...p.rHand] as Vec, glassesOff: [...p.glassesOff] as Vec });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -334,11 +418,29 @@ export function Avatar({
             {/* eyes + eyelids */}
             <Ellipse cx={208} cy={214} rx={20} ry={24} fill="#FFFFFF" />
             <Ellipse cx={292} cy={214} rx={20} ry={24} fill="#FFFFFF" />
-            <Circle cx={203 + pose.look[0]} cy={218 + pose.look[1]} r={13} fill="#2A1A12" />
-            <Circle cx={287 + pose.look[0]} cy={218 + pose.look[1]} r={13} fill="#2A1A12" />
-            <Circle cx={199 + pose.look[0]} cy={212 + pose.look[1]} r={4.5} fill="#FFFFFF" />
-            <Circle cx={283 + pose.look[0]} cy={212 + pose.look[1]} r={4.5} fill="#FFFFFF" />
-            {pose.blink > 0.05 ? (
+            {pose.eyes === 'happy' ? (
+              // laughing eyes: closed arcs
+              <>
+                <Rect x={186} y={188} width={44} height={52} fill={SKIN} />
+                <Rect x={270} y={188} width={44} height={52} fill={SKIN} />
+                <Path d="M192 222 Q208 202 224 222" stroke="#2A1A12" strokeWidth={6} strokeLinecap="round" fill="none" />
+                <Path d="M276 222 Q292 202 308 222" stroke="#2A1A12" strokeWidth={6} strokeLinecap="round" fill="none" />
+              </>
+            ) : (
+              <>
+                <Circle cx={203 + pose.look[0]} cy={218 + pose.look[1]} r={pose.eyes === 'squint' ? 9 : 13} fill="#2A1A12" />
+                <Circle cx={287 + pose.look[0]} cy={218 + pose.look[1]} r={pose.eyes === 'squint' ? 9 : 13} fill="#2A1A12" />
+                <Circle cx={199 + pose.look[0]} cy={212 + pose.look[1]} r={4.5} fill="#FFFFFF" />
+                <Circle cx={283 + pose.look[0]} cy={212 + pose.look[1]} r={4.5} fill="#FFFFFF" />
+                {pose.eyes === 'squint' ? (
+                  <>
+                    <Rect x={186} y={188} width={44} height={20} fill={SKIN} />
+                    <Rect x={270} y={188} width={44} height={20} fill={SKIN} />
+                  </>
+                ) : null}
+              </>
+            )}
+            {pose.blink > 0.05 && pose.eyes !== 'happy' ? (
               <>
                 <Rect x={186} y={188} width={44} height={50 * pose.blink} fill={SKIN} />
                 <Rect x={270} y={188} width={44} height={50 * pose.blink} fill={SKIN} />
@@ -347,12 +449,12 @@ export function Avatar({
 
             {/* eyebrows */}
             <G transform={`translate(0, ${-pose.brow})`}>
-              <Path d="M186 176 C196 168 212 168 222 174" stroke={HAIR} strokeWidth={6} strokeLinecap="round" fill="none" />
-              <Path d="M278 174 C288 168 304 168 314 176" stroke={HAIR} strokeWidth={6} strokeLinecap="round" fill="none" />
+              <Path d="M186 176 C196 168 212 168 222 174" stroke={HAIR} strokeWidth={6} strokeLinecap="round" fill="none" transform={`rotate(${pose.browAngle} 204 172)`} />
+              <Path d="M278 174 C288 168 304 168 314 176" stroke={HAIR} strokeWidth={6} strokeLinecap="round" fill="none" transform={`rotate(${-pose.browAngle} 296 172)`} />
             </G>
 
             {/* glasses */}
-            <G transform={`translate(0, ${pose.glassesY})`}>
+            <G transform={`translate(${pose.glassesOff[0]}, ${pose.glassesY + pose.glassesOff[1]})`}>
               <Circle cx={208} cy={214} r={31} stroke={FRAME} strokeWidth={6} fill="#FFFFFF" fillOpacity={0.12} />
               <Circle cx={292} cy={214} r={31} stroke={FRAME} strokeWidth={6} fill="#FFFFFF" fillOpacity={0.12} />
               <Path d="M239 210 Q250 200 261 210" stroke={FRAME} strokeWidth={6} fill="none" strokeLinecap="round" />
@@ -366,10 +468,30 @@ export function Avatar({
           </G>
         </G>
 
-        {/* thinking dots */}
-        {pose.dots > 0 ? <Circle cx={372 + pose.x} cy={86} r={10} fill="#F4F1E8" /> : null}
-        {pose.dots > 1 ? <Circle cx={400 + pose.x} cy={58} r={14} fill="#F4F1E8" /> : null}
-        {pose.dots > 2 ? <Circle cx={434 + pose.x} cy={26} r={18} fill="#F4F1E8" /> : null}
+        {/* thought cloud: three bubbles grow, then a cloud with « ? » (ink outline: visible on any background) */}
+        {pose.dots > 0 ? <Circle cx={364 + pose.x} cy={96} r={9} fill="#FFFFFF" stroke="#2D3142" strokeWidth={4} /> : null}
+        {pose.dots > 1 ? <Circle cx={388 + pose.x} cy={66} r={13} fill="#FFFFFF" stroke="#2D3142" strokeWidth={4} /> : null}
+        {pose.thinkMark > 0.05 ? (
+          <G opacity={pose.thinkMark}>
+            <Ellipse cx={444 + pose.x} cy={22} rx={58} ry={38} fill="#FFFFFF" stroke="#2D3142" strokeWidth={5} />
+            <SvgText x={444 + pose.x} y={40} fontSize={50} fontWeight="900" fill="#3557A8" textAnchor="middle">
+              {pose.dots > 2 ? '?' : '…'}
+            </SvgText>
+          </G>
+        ) : null}
+        {pose.laugh >= 0 ? (
+          <G opacity={1 - pose.laugh * 0.6}>
+            <SvgText x={350 + pose.x} y={120 - pose.laugh * 40} fontSize={40} fontWeight="900" fill="#FF6B5E" rotation={12} origin={`${350 + pose.x}, ${120 - pose.laugh * 40}`}>
+              ha ha !
+            </SvgText>
+          </G>
+        ) : null}
+        {pose.puffs > 0.05 ? (
+          <G opacity={pose.puffs} transform={`translate(${pose.x}, ${pose.bodyY})`}>
+            <Path d="M372 96 l18 -14 M380 116 l24 -4 M366 78 l8 -20" stroke="#D63B30" strokeWidth={7} strokeLinecap="round" />
+            <Path d="M128 96 l-18 -14 M120 116 l-24 -4 M134 78 l-8 -20" stroke="#D63B30" strokeWidth={7} strokeLinecap="round" />
+          </G>
+        ) : null}
 
         {pose.confetti >= 0 ? <Confetti age={pose.confetti} x={pose.x} /> : null}
       </Svg>
@@ -416,6 +538,7 @@ function Mouth({ mode, open }: { mode: MouthMode; open: number }) {
     );
   }
   if (mode === 'o') return <Ellipse cx={262} cy={272} rx={7} ry={8} fill={MOUTH} />;
+  if (mode === 'flat') return <Path d="M228 272 Q239 266 250 272 T272 272" stroke={MOUTH} strokeWidth={6} strokeLinecap="round" fill="none" />;
   if (mode === 'open' && open > 0.08) {
     const d = 260 + 40 * open;
     return (

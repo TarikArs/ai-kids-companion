@@ -51,7 +51,7 @@ export const SPEAKING_STYLE: Record<Lang, string> = {
   en: `English, with ${KID_WORDS}`,
 };
 
-export type PhraseKind = 'praise' | 'encourage' | 'hint' | 'explain' | 'filler' | 'greeting' | 'pause' | 'resume' | 'end' | 'ask' | 'read_good';
+export type PhraseKind = 'praise' | 'encourage' | 'hint' | 'explain' | 'filler' | 'greeting' | 'pause' | 'resume' | 'end' | 'ask' | 'read_good' | 'nudge';
 
 /** "grade 3 (about 8 years old)": used in every prompt. 7 = collège. */
 export function gradeLabel(grade: number | null | undefined): string {
@@ -73,6 +73,7 @@ export const PHRASES: Record<Lang, Record<PhraseKind, string[]>> = {
     end: ['Bravo ! Les devoirs sont finis.'],
     ask: ['Quel exercice veux-tu que je t’explique ? Touche son numéro.'],
     read_good: ['Bravo, tu as très bien lu !', 'Super lecture, continue !', 'Très bonne lecture !'],
+    nudge: ['Tu es là ? Je t’attends.', 'Tu as besoin d’aide ? Appuie sur Expliquer.', 'Prends ton temps, je suis là.'],
   },
   ar: {
     praise: ['برافو عليك!', 'مزيان بزاف!', 'واعرة! كمّلي هكا.'],
@@ -86,6 +87,7 @@ export const PHRASES: Record<Lang, Record<PhraseKind, string[]>> = {
     end: ['سالينا! برافو عليك اليوم.'],
     ask: ['شمن تمرين بغيتي نشرح ليك؟ ورّكي على الرقم ديالو.'],
     read_good: ['برافو، قريتي مزيان بزاف!', 'واعرة القراية ديالك، كمّلي!'],
+    nudge: ['واش نتي هنا؟ أنا كنتسناك.', 'خاصك شي مساعدة؟ ورّكي على شرح.', 'خدي الوقت ديالك، أنا هنا.'],
   },
   fus: {
     praise: ['أحسنتِ!', 'ممتاز!', 'رائع، استمري!'],
@@ -99,6 +101,7 @@ export const PHRASES: Record<Lang, Record<PhraseKind, string[]>> = {
     end: ['أحسنتِ! انتهت الواجبات.'],
     ask: ['أي تمرين تريدين أن أشرحه لكِ؟ المسي رقمه.'],
     read_good: ['أحسنتِ، قراءة رائعة!', 'قراءة ممتازة، واصلي!'],
+    nudge: ['هل أنتِ هنا؟ أنا أنتظركِ.', 'هل تحتاجين مساعدة؟ اضغطي على اشرحي.', 'خذي وقتكِ، أنا هنا.'],
   },
   en: {
     praise: ['Well done!', 'Great job!', 'Yes, that’s right!'],
@@ -112,6 +115,7 @@ export const PHRASES: Record<Lang, Record<PhraseKind, string[]>> = {
     end: ['Well done! Homework is finished.'],
     ask: ['Which exercise should I explain? Tap its number.'],
     read_good: ['Great reading!', 'Lovely reading, keep going!'],
+    nudge: ['Are you there? I am waiting for you.', 'Do you need help? Press Explain.', 'Take your time, I am here.'],
   },
 };
 
@@ -195,6 +199,23 @@ export const VERDICT_TEXT: Record<
     solutionOff: 'The solution is turned off. Ask mum or dad.',
   },
 };
+
+/**
+ * « Bravo ! » -> « Bravo Lina ! »: the child's first name in the first cheer of a sentence Silia makes now (never in the
+ * familiar phrases recorded once for everyone).
+ */
+export function withName(text: string, name: string | null | undefined, lang: Lang): string {
+  if (!name) return text;
+  const cheer: Record<Lang, RegExp> = {
+    fr: /(bravo|super)(\s*[!,.])/i,
+    en: /(well done|great job)(\s*[!,.])/i,
+    fus: /(أحسنتِ)(\s*[!،.])/,
+    ar: /(برافو(?: عليك)?)(\s*[!،.])/,
+  };
+  return text.replace(cheer[lang], (_m, word: string, end: string) =>
+    lang === 'en' ? `${word}, ${name}${end.trim()}` : isArabic(lang) ? `${word} يا ${name}${end}` : `${word} ${name}${end}`,
+  );
+}
 
 type Act = 'explain' | 'solve' | 'correct' | 'similar' | 'solution';
 const list = (lang: Lang, ns: string[]) => {

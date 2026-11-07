@@ -1,6 +1,8 @@
-// session-summary: end of the session, like a teacher. Called by the Camera's "Terminer" before the session closes.
+// session-summary: end of the session, like a teacher.
 //
-// POST { session_id, turn? }   Caller: a member of the household.
+// POST { session_id, turn?, quiet? }   Caller: a member of the household.
+// quiet = the parent opened Accueil (no « Terminer » button any more): the report is written for the parent only, nothing
+// is said on the Board, and only when the session has been idle for 20 min (a session still going is not summed up yet).
 // 1. Gathers what happened: answers checked (right / wrong), hints, explanations, reading fixes, duration.
 // 2. One text-only call writes two texts: a short spoken recap for the child (real achievements + ONE thing to practise)
 //    and a short report for the parent.
@@ -29,12 +31,13 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   const log = makeLog('session-summary');
-  const body = (await req.json().catch(() => ({}))) as { session_id?: unknown; turn?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { session_id?: unknown; turn?: unknown; quiet?: unknown };
+  const quiet = body.quiet === true;
   if (typeof body.session_id !== 'string') return json({ error: 'session_id is required' }, 400);
 
   const [user, { data: session }] = await Promise.all([
     getCaller(req),
-    admin.from('homework_sessions').select('id, household_id, started_at, children(name, tutor_language, grade)').eq('id', body.session_id).maybeSingle(),
+    admin.from('homework_sessions').select('id, household_id, started_at, summary, children(name, tutor_language, grade)').eq('id', body.session_id).maybeSingle(),
   ]);
   if (!user) return json({ error: 'Sign in first' }, 401);
   if (!session) return json({ error: 'Session not found' }, 404);
@@ -42,14 +45,23 @@ Deno.serve(async (req) => {
 
   const child = session.children as { name?: string; tutor_language?: string; grade?: number } | null;
   const send = turnSender(`session:${session.id}`, parseTurn(body.turn));
-  send('tutor.thinking', {});
+  if (!quiet) send('tutor.thinking', {});
 
   try {
     const [{ data: obs }, { data: msgs }, { data: talk }] = await Promise.all([
       admin.from('observations').select('item_id, observed_answer, is_correct, created_at').eq('session_id', session.id).order('created_at'),
       admin.from('tutor_messages').select('kind, text, language, action, created_at').eq('session_id', session.id).neq('kind', 'system').order('created_at'),
-      admin.from('child_utterances').select('transcript').eq('session_id', session.id),
+      admin.from('child_utterances').select('transcript, created_at').eq('session_id', session.id),
     ]);
+    // When the work really happened (the session row stays open: there is no « Terminer » any more).
+    const times = [...(obs ?? []), ...(msgs ?? []), ...(talk ?? [])].map((r) => Date.parse((r as { created_at: string }).created_at)).filter(Number.isFinite);
+    const lastActivity = times.length ? Math.max(...times) : 0;
+    if (quiet) {
+      const old = session.summary as { at?: string } | null;
+      if (!lastActivity) return json({ skipped: 'empty' });
+      if (Date.now() - lastActivity < 20 * 60_000) return json({ skipped: 'active' });
+      if (old?.at && Date.parse(old.at) >= lastActivity) return json(old);
+    }
     // Latest verdict per item (an answer corrected later counts as right).
     const latest = new Map<string, { a: string | null; ok: boolean | null }>();
     for (const o of obs ?? []) latest.set(o.item_id, { a: o.observed_answer, ok: o.is_correct });
@@ -57,7 +69,12 @@ Deno.serve(async (req) => {
     const right = verdicts.filter((v) => v.ok === true).length;
     const wrongNow = verdicts.filter((v) => v.ok === false).length;
     const fixedLater = (obs ?? []).filter((o) => o.is_correct === false).map((o) => o.item_id).filter((id) => latest.get(id)?.ok === true);
-    const minutes = Math.max(1, Math.round((Date.now() - Date.parse(session.started_at)) / 60_000));
+    // Real work time: the session row can stay open for days (no « Terminer »), so only the time between actions counts;
+    // a pause of more than 15 min is not work time.
+    const sorted = [Date.parse(session.started_at), ...times].sort((a, b) => a - b);
+    let workMs = 0;
+    for (let i = 1; i < sorted.length; i++) workMs += Math.min(sorted[i] - sorted[i - 1], 15 * 60_000) * (sorted[i] - sorted[i - 1] <= 15 * 60_000 ? 1 : 0);
+    const minutes = Math.max(1, Math.round(workMs / 60_000));
     const language: Lang = tutorLang(child?.tutor_language, msgs?.at(-1)?.language ?? 'fr');
     const helped = (msgs ?? []).filter((m) => m.kind === 'hint' || m.kind === 'explain').map((m) => m.text).slice(-8);
     const readingFixes = (msgs ?? []).map((m) => String(m.action ?? '')).filter((a) => a.startsWith('reading_fix:')).map((a) => a.slice(12));
@@ -120,7 +137,14 @@ suggestion for tomorrow. Plain, factual, kind. No emojis.`,
       right,
       wrong: wrongNow,
       at: new Date().toISOString(),
+      last_at: new Date(lastActivity || Date.now()).toISOString(),
     };
+    if (quiet) {
+      // For the parent only: nothing said on the Board, no voice made.
+      await admin.from('homework_sessions').update({ summary }).eq('id', session.id);
+      log('summary (quiet)', summary);
+      return json(summary);
+    }
     const audioUrl = await speechUrl(childText, language, session.household_id);
     const messageId = crypto.randomUUID();
     await send('tutor.say', { message_id: messageId, kind: 'praise', text: childText, language, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });

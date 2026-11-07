@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 
 // Familiar tutor phrases (generated once by warm-phrases), loaded at Board start.
 
-export type PhraseKind = 'praise' | 'encourage' | 'hint' | 'explain' | 'filler' | 'greeting' | 'pause' | 'resume' | 'end' | 'ask' | 'read_good';
+export type PhraseKind = 'praise' | 'encourage' | 'hint' | 'explain' | 'filler' | 'greeting' | 'pause' | 'resume' | 'end' | 'ask' | 'read_good' | 'nudge';
 
 export interface Phrase {
   lang: string;

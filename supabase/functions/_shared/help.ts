@@ -4,12 +4,13 @@
 import { expectedAnswer, ownCalculationSlip, sameAnswer } from './arithmetic.ts';
 import { checkCopy, copyModel } from './copy.ts';
 import { broadcast, type Turn } from './broadcast.ts';
-import { FOCUS_TEXT, isArabic, KID_WORDS, LANGUAGE_NAME, PHRASES, SPEAKING_STYLE, tutorLang, VERDICT_TEXT, type Lang } from './language.ts';
+import { FOCUS_TEXT, isArabic, KID_WORDS, LANGUAGE_NAME, PHRASES, SPEAKING_STYLE, tutorLang, VERDICT_TEXT, type Lang, withName } from './language.ts';
 import { HELP_ACTIONS, type Decision, type FocusState, type HelpAction, type Intent, type Practice } from './intent.ts';
 import { downloadB64, pageText, type PageContext, type PageExercise, type SnapshotRow } from './page.ts';
 import { admin } from './supabase.ts';
-import { speechUrl } from './tts.ts';
+import { lastTtsError, speechUrl } from './tts.ts';
 import { zoomExercise } from './zoom.ts';
+import { judgeFollowUp, signal } from './signals.ts';
 import { checkOpen, confirm, guideQuestion, hintFor, judge, practiceLines, solutionLines, type Line, type LineStatus } from './verdict.ts';
 
 const MODEL = Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-6-luna';
@@ -23,6 +24,8 @@ export interface HelpCtx {
   /** The turn this request belongs to (echoed on every message). */
   turn?: Turn | null;
   grade: string;
+  /** The child's first name (« Bravo Lina ! »): in what Silia makes up now, never in the recorded familiar phrases. */
+  childName?: string | null;
   advanced: boolean;
   /** Parent's tutor language ('auto' / null = follow the page). */
   setting: string | null | undefined;
@@ -107,7 +110,7 @@ async function say(
     kind,
     text,
     language,
-    ...(audioUrl ? { audio_url: audioUrl } : {}),
+    ...(audioUrl ? { audio_url: audioUrl } : { tts_error: lastTtsError || 'unknown' }),
     ...(c.snap ? { snapshot_id: c.snap.id } : {}),
     annotations,
     ...(opts.exercise ? { exercise_index: opts.exercise.n } : {}),
@@ -185,11 +188,14 @@ ${others ? `Other exercises on the page (context only, do not work on them): ${o
 
 function languageRule(c: HelpCtx): string {
   const forced = forcedLang(c);
-  return forced
+  const name = c.childName
+    ? `\nThe girl's first name is ${c.childName}. Use it now and then, warmly (in a cheer or when you ask her something: « Bravo ${c.childName} ! »), about one message in three, never twice in a message.`
+    : '';
+  return (forced
     ? `Write ONLY in ${LANGUAGE_NAME[forced]}, whatever the page's language${isArabic(forced) ? ', speaking to a girl (feminine forms)' : ''}. Put "lang":"${forced}".
 Use ${KID_WORDS}.`
     : `Write in the exercise's own language: French page -> French; Arabic page -> simple Modern Standard Arabic (Fusha) in Arabic script, speaking to a girl (feminine forms), "lang":"fus"; English page -> English.
-Use ${KID_WORDS}.`;
+Use ${KID_WORDS}.`) + name;
 }
 
 function taskFor(c: HelpCtx, action: HelpAction, level: number): string {
@@ -462,6 +468,12 @@ async function speakLines(
     mode = 'verdict';
     text = meta.done ?? (empty.length ? `${prefix}${PHRASES[lang].encourage[0]}` : `${V.allGood}${meta.next ? ` ${V.next(exName(meta.next))}` : ''}`);
   }
+  // Her name in the first cheer (« 3 justes, bravo Lina ! », « Tout est juste, bravo Lina ! »).
+  text = withName(text, c.childName, lang);
+  // Quality signals: what Silia decided; her next answer tells whether the reading or the verdict was wrong.
+  signal(c, 'verdict', { right: right.length, wrong: wrong.length, unsure: unsure.length, open: open.length, empty: empty.length, practice: !!meta.practice, mode }, { exercise: meta.index });
+  if (mode === 'verdict' && wrong.length) signal(c, 'wrong_said', { q: itemLabel(wrong[0].q), a: wrong[0].a }, { exercise: meta.index });
+  else if (unsure.length && kind === 'question' && !wrong.length) signal(c, 'unsure_asked', { q: itemLabel(unsure[0].q), read: unsure[0].a }, { exercise: meta.index });
   c.log('verdict', { exercise: name, practice: !!meta.practice, mode, lines: lines.map((l) => `${l.q} -> ${l.a ?? '-'} [${l.status}]`) });
   const next = meta.next;
   await bc(c, 'exercise.result', {
@@ -664,7 +676,7 @@ export async function execute(
         snapshot_id: c.snap!.id,
         language: lang,
         text,
-        ...(audioUrl ? { audio_url: audioUrl } : {}),
+        ...(audioUrl ? { audio_url: audioUrl } : { tts_error: lastTtsError || 'unknown' }),
         choices,
         suggested: suggested.n,
         ...(d.action ? { action: d.action } : {}),
@@ -678,11 +690,13 @@ export async function execute(
       return { done: d.do, text, language: lang, exercise: d.exercise.n };
     }
     case 'answer': {
+      await judgeFollowUp(c, opts.transcript ?? '');
       const text = (await answerTurn(c, opts.transcript ?? '', d.exercise, lang)) ?? FOCUS_TEXT[lang].askWhich(null);
       await say(c, text, lang, 'question', d.exercise ? { exercise: d.exercise, action: c.focus?.action } : {});
       return { done: d.do, text, language: lang, exercise: d.exercise?.n };
     }
     case 'help': {
+      signal(c, 'action', { action: d.action, by }, { exercise: d.exercise.n });
       // Focus first: the Board and the Camera show the active exercise while Silia thinks.
       await saveFocus(c, d.exercise, d.auto ? 'auto' : by, d.action, null);
       if (d.action === 'similar') {

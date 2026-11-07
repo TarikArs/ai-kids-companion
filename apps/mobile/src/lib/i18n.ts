@@ -251,6 +251,20 @@ const EN: Dict = {
   Expliquer: 'Explain',
   'Résoudre ensemble': 'Solve together',
   Vérifier: 'Check',
+  Correction: 'Correction',
+  'Tu es là ? Je t’attends.': 'Are you there? I am waiting for you.',
+  'Ta réponse : {a}': 'Your answer: {a}',
+  "Nom de l'appareil": 'Device name',
+  'TV du salon': 'Living-room TV',
+  'Ce code est faux, expiré ou déjà utilisé. Demande un nouveau code.': 'This code is wrong, expired or already used. Ask for a new code.',
+  'Langues et voix': 'Languages and voice',
+  'Boutons et écrans · tous les appareils de la famille': 'Buttons and screens · all the family’s devices',
+  Téléphone: 'Phone',
+  '{name} parle à voix haute': '{name} speaks aloud',
+  'Coupé : elle écrit seulement au Tableau': 'Off: she only writes on the Board',
+  'Activé : les phrases déjà dites sont gratuites': 'On: sentences already said are free',
+  'Agrandir la photo': 'Make the photo bigger',
+  'Active {name}, ta maîtresse.': 'Wake up {name}, your teacher.',
 };
 
 const AR: Dict = {
@@ -435,6 +449,20 @@ const AR: Dict = {
   Expliquer: 'اشرحي',
   'Résoudre ensemble': 'نحلّ معًا',
   Vérifier: 'تحقق',
+  Correction: 'التصحيح',
+  'Tu es là ? Je t’attends.': 'هل أنتِ هنا؟ أنا أنتظركِ.',
+  'Ta réponse : {a}': 'جوابك: {a}',
+  "Nom de l'appareil": 'اسم الجهاز',
+  'TV du salon': 'تلفاز الصالون',
+  'Ce code est faux, expiré ou déjà utilisé. Demande un nouveau code.': 'هذا الرمز خاطئ أو منتهي الصلاحية أو مستعمل. اطلب رمزًا جديدًا.',
+  'Langues et voix': 'اللغات والصوت',
+  'Boutons et écrans · tous les appareils de la famille': 'الأزرار والشاشات · كل أجهزة العائلة',
+  Téléphone: 'الهاتف',
+  '{name} parle à voix haute': '{name} تتكلم بصوت عالٍ',
+  'Coupé : elle écrit seulement au Tableau': 'متوقف: تكتب فقط على السبورة',
+  'Activé : les phrases déjà dites sont gratuites': 'مفعّل: الجمل التي قيلت سابقًا مجانية',
+  'Agrandir la photo': 'تكبير الصورة',
+  'Active {name}, ta maîtresse.': 'شغّلي {name}، معلمتك.',
 };
 
 const DICT: Record<Exclude<AppLang, 'fr'>, Dict> = { en: EN, ar: AR };

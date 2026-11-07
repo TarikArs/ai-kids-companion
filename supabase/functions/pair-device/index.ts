@@ -81,7 +81,27 @@ async function claimCode(userId: string, code: unknown, name: unknown) {
     .select('household_id, role')
     .maybeSingle();
   if (error) return json({ error: error.message }, 500);
-  if (!claimed) return json({ error: 'Code is wrong, expired or already used' }, 404);
+  if (!claimed) {
+    // Same device trying the same code again (the first answer was lost, or the screen was reset): it is already linked,
+    // give it its link back instead of « already used ».
+    const { data: mine } = await admin
+      .from('pairing_codes')
+      .select('household_id, role')
+      .eq('code', code)
+      .eq('used_by', userId)
+      .gt('expires_at', now)
+      .maybeSingle();
+    if (!mine) return json({ error: 'Code is wrong, expired or already used' }, 404);
+    const { data: again, error: againErr } = await admin
+      .from('devices')
+      .update({ revoked_at: null, last_seen_at: now })
+      .eq('user_id', userId)
+      .eq('household_id', mine.household_id)
+      .select('id, household_id, role')
+      .maybeSingle();
+    if (againErr || !again) return json({ error: 'Code is wrong, expired or already used' }, 404);
+    return json({ device_id: again.id, household_id: again.household_id, role: again.role });
+  }
   if (claimed.role === 'camera' && (await otherCamera(claimed.household_id, userId))) {
     return json({ error: CAMERA_EXISTS, code: 'camera_exists' }, 409);
   }

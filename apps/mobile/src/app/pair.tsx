@@ -7,6 +7,7 @@ import { RoleArt } from '@/components/illustrations';
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
+import { deviceName } from '@/lib/device-name';
 import { t } from '@/lib/i18n';
 
 /** Board or Camera: sign in anonymously, then claim the 6-digit code shown on the parent's phone. */
@@ -30,9 +31,12 @@ export default function Pair() {
         if (signInError) throw signInError;
       }
       const { data, error: fnError } = await supabase.functions.invoke('pair-device', {
-        body: { action: 'claim', code, name: label },
+        body: { action: 'claim', code, name: deviceName() },
       });
-      if (fnError) throw new Error(await functionError(fnError));
+      if (fnError) {
+        const msg = await functionError(fnError);
+        throw new Error(/wrong, expired|already used/i.test(msg) ? t('Ce code est faux, expiré ou déjà utilisé. Demande un nouveau code.') : msg);
+      }
       if (data.role !== role) {
         throw new Error(data.role === 'board' ? t('Ce code est pour le Tableau. Demande un autre code.') : t('Ce code est pour la Caméra. Demande un autre code.'));
       }

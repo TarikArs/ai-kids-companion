@@ -18,6 +18,7 @@ import { checkPractice, execute, loadFocus, type HelpCtx } from '../_shared/help
 import type { Decision, FocusState } from '../_shared/intent.ts';
 import { gradeLabel, SPEAKING_STYLE, tutorLang } from '../_shared/language.ts';
 import { logTurn, makeLog } from '../_shared/log.ts';
+import { signal } from '../_shared/signals.ts';
 import { DEFAULT_HINT_LANG, pageOf, READ_EFFORT, READ_MODEL, readPage, type PageContext, type PageExercise } from '../_shared/page.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
 
@@ -55,10 +56,10 @@ Deno.serve(async (req) => {
   if (!snap) return json({ error: 'Snapshot not found' }, 404);
   const [allowed, { data: session }] = await Promise.all([
     isHouseholdMember(user.id, snap.household_id),
-    admin.from('homework_sessions').select('rotation, children(tutor_language, grade)').eq('id', snap.session_id).maybeSingle(),
+    admin.from('homework_sessions').select('rotation, children(name, tutor_language, grade)').eq('id', snap.session_id).maybeSingle(),
   ]);
   if (!allowed) return json({ error: 'Not allowed' }, 403);
-  const child = session?.children as { tutor_language?: string; grade?: number } | null;
+  const child = session?.children as { name?: string; tutor_language?: string; grade?: number } | null;
   const grade = gradeLabel(child?.grade);
 
   const send = turnSender(`session:${snap.session_id}`, turn);
@@ -109,6 +110,33 @@ Deno.serve(async (req) => {
     const page: PageContext = usable ? pageOf(reading) : { ...pageOf(reading), readable: false };
     // Saved BEFORE answering: a tap on an exercise right after uses this reading (no second reading of the page).
     await admin.from('snapshots').update({ status: usable ? 'analyzed' : 'skipped', exercises: page, page_lang: page.lang }).eq('id', snap.id);
+    // Quality signal: is this the same page as the photo just before (photographed again = the first try went wrong)?
+    {
+      const { data: prev } = await admin
+        .from('snapshots')
+        .select('exercises, taken_at')
+        .eq('session_id', snap.session_id)
+        .neq('id', snap.id)
+        .lt('taken_at', new Date().toISOString())
+        .order('taken_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const titles = (p: PageContext | null | undefined) => new Set((p?.exercises ?? []).map((e) => e.title.toLowerCase().trim()));
+      const before = titles((prev as { exercises?: PageContext } | null)?.exercises);
+      const now = titles(page);
+      const shared = [...now].filter((x) => before.has(x)).length;
+      signal(
+        { session: { id: snap.session_id, household_id: snap.household_id }, snap: { id: snap.id }, log },
+        'photo',
+        {
+          usable,
+          exercises: page.exercises.length,
+          same_page: now.size > 0 && shared >= Math.ceil(now.size / 2),
+          since_prev_s: prev ? Math.round((Date.now() - Date.parse((prev as { taken_at: string }).taken_at)) / 1000) : null,
+        },
+        { model: READ_MODEL },
+      );
+    }
     if (!usable) send('snapshot.rejected', { snapshot_id: snap.id, reason: reading.handBlocking ? 'hand_blocking' : 'no_page' });
 
     const c: HelpCtx = {
@@ -116,6 +144,7 @@ Deno.serve(async (req) => {
       topic: `session:${snap.session_id}`,
       turn,
       grade,
+      childName: child?.name?.trim() || null,
       advanced: Number(child?.grade ?? 1) >= 4,
       setting,
       snap: { id: snap.id, storage_path: snap.storage_path, exercises: page },

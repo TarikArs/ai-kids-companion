@@ -68,6 +68,8 @@ export interface SessionSummary {
   right: number;
   wrong: number;
   at: string;
+  /** When she last worked in this session (the date shown to the parent). */
+  last_at?: string;
 }
 
 /** One line of the checked exercise. right / wrong: checked in code; unsure: hard to read; open: Silia asks Lina. */
@@ -106,6 +108,8 @@ export interface SessionEvents {
     turn?: TurnRef;
     /** The exercise this message is about. */
     exercise_index?: number;
+    /** No audio_url: why the voice could not be made (shown in the Board's log, the device voice is used instead). */
+    tts_error?: string;
   };
   /** Several exercises on the page (or "which one?"): the choices, and the one Silia suggests. */
   'tutor.ask_exercise': {
@@ -119,6 +123,8 @@ export interface SessionEvents {
     turn?: TurnRef;
     /** The help waiting for the choice. */
     action?: HelpAction;
+    /** No audio_url: why the voice could not be made. */
+    tts_error?: string;
   };
   /** The exercise was checked: one line per item (verdict), or Silia asks for Lina's answer (guide), or it is not started. */
   'exercise.result': {

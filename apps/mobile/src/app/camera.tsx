@@ -44,6 +44,7 @@ import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
 import { colors, radius, space } from '@/lib/theme';
 import { TUTOR_NAME } from '@/lib/tutor';
+import { useRevokedWatch } from '@/lib/use-revoked';
 import { useUnpair } from '@/lib/use-unpair';
 import { applyFamilyLang, t } from '@/lib/i18n';
 
@@ -124,6 +125,8 @@ export default function Camera() {
   const setDevice = useAppStore((s) => s.setDevice);
   const setRole = useAppStore((s) => s.setRole);
   const unpair = useUnpair();
+  // Removed by the parent: back to the first screen within a few seconds.
+  useRevokedWatch();
   /** Parent's phone in Camera mode: "back to parent" instead of unlinking. */
   const backToParent = () => {
     setDevice(null);
@@ -615,7 +618,7 @@ export default function Camera() {
                     icon="eye"
                     label={t('{name}, regarde', { name: TUTOR_NAME })}
                     caption={t('{name}, regarde', { name: TUTOR_NAME })}
-                    size={112}
+                    size={92}
                     tone="accent"
                     onPress={() => capture()}
                     loading={taking}

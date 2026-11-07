@@ -127,6 +127,7 @@ export function Chunky({
   accessibilityLabel?: string;
   accessibilityRole?: 'button' | 'tab' | 'radio' | 'switch';
 }) {
+  const [hover, setHover] = useState(false);
   return (
     <Pressable
       accessibilityRole={accessibilityRole}
@@ -134,13 +135,19 @@ export function Chunky({
       onPress={onPress}
       disabled={disabled}
       hitSlop={6}
-      style={({ pressed }) => [
-        styles.chunky,
-        { backgroundColor: CRAYON[color], borderRadius: radius },
-        pressed && !disabled ? { transform: [{ translateX: depth - 1 }, { translateY: depth - 1 }], ...hardShadow(1) } : hardShadow(depth),
-        disabled && styles.disabled,
-        style,
-      ]}
+      onHoverIn={() => setHover(true)}
+      onHoverOut={() => setHover(false)}
+      style={({ pressed }) => {
+        const d = disabled ? depth : pressed ? 1 : hover ? 2 : depth;
+        return [
+          styles.chunky,
+          { backgroundColor: CRAYON[color], borderRadius: radius },
+          d < depth ? { transform: [{ translateX: depth - d }, { translateY: depth - d }] } : null,
+          hardShadow(d),
+          disabled && styles.disabled,
+          style,
+        ];
+      }}
     >
       {children}
     </Pressable>

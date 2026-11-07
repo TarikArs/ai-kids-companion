@@ -19,7 +19,7 @@ import { decide, looksLikeCommand, quickIntent } from '../_shared/intent.ts';
 import { classify, execute, loadFocus, type HelpCtx } from '../_shared/help.ts';
 import { latestSnapshot, pageContext, pageText, type PageContext } from '../_shared/page.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
-import { phrasePath, speechUrl } from '../_shared/tts.ts';
+import { phrasePath, speechUrl, lastTtsError } from '../_shared/tts.ts';
 import { decodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
@@ -90,13 +90,13 @@ Deno.serve(async (req) => {
 
   const [user, { data: session }] = await Promise.all([
     getCaller(req),
-    admin.from('homework_sessions').select('id, household_id, children(tutor_language, grade)').eq('id', session_id).maybeSingle(),
+    admin.from('homework_sessions').select('id, household_id, children(name, tutor_language, grade)').eq('id', session_id).maybeSingle(),
   ]);
   if (!user) return json({ error: 'Sign in first' }, 401);
   if (!session) return json({ error: 'Session not found' }, 404);
   if (!(await isHouseholdMember(user.id, session.household_id))) return json({ error: 'Not allowed' }, 403);
 
-  const child = session.children as { tutor_language?: string; grade?: number } | null;
+  const child = session.children as { name?: string; tutor_language?: string; grade?: number } | null;
   const grade = gradeLabel(child?.grade);
   log('start', { session: session.id, ...(typed ? { typed } : { audio_bytes: audio.byteLength, mime }), grade });
   const topic = `session:${session.id}`;
@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       if (word && spoken.some((w) => similar(w.norm, normalizeWord(word)))) {
         const text = REPEAT_OK[language];
         const audioUrl = await speechUrl(text, language, session.household_id);
-        await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'praise', text, language, ...(audioUrl ? { audio_url: audioUrl } : {}), annotations: [] });
+        await send('tutor.say', { message_id: crypto.randomUUID(), kind: 'praise', text, language, ...(audioUrl ? { audio_url: audioUrl } : { tts_error: lastTtsError || 'unknown' }), annotations: [] });
         log('decision', { mode: 'repeat', word, ok: true });
         return json({ mode: 'repeat', transcript, text, ms: Date.now() - started });
       }
@@ -186,6 +186,7 @@ Deno.serve(async (req) => {
         topic,
         turn,
         grade,
+      childName: child?.name?.trim() || null,
         advanced: Number(child?.grade ?? 1) >= 4,
         setting: child?.tutor_language,
         snap,
@@ -257,7 +258,7 @@ Deno.serve(async (req) => {
       text,
       language,
       ...(phrase ? { phrase } : {}),
-      ...(audioUrl ? { audio_url: audioUrl } : {}),
+      ...(audioUrl ? { audio_url: audioUrl } : phrase ? {} : { tts_error: lastTtsError || 'unknown' }),
       annotations: [],
     });
     inBackground(
