@@ -4,7 +4,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,6 +19,7 @@ import { ACTION_LABEL, exerciseName, requestHelp, sendTyped } from '@/lib/exerci
 import { log } from '@/lib/log';
 import { loadPhrases, pickPhrase } from '@/lib/phrases';
 import { findOpenSession, newTurn, onEvent, sendEvent, sessionChannel, type HomeworkSession } from '@/lib/session';
+import { isTV } from '@/lib/device-name';
 import { useAppStore } from '@/lib/store';
 import { functionError, supabase } from '@/lib/supabase';
 import { font, hardShadow, paper } from '@/lib/paper-theme';
@@ -123,6 +124,8 @@ export default function Board() {
   const [busy, setBusy] = useState(false);
   /** Several exercises on the page: the choices, and the one Silia suggests. */
   const [choices, setChoices] = useState<ExerciseChoice[]>([]);
+  /** The list of exercises opens in its own window, so the photo and Silia's page keep their room. */
+  const [pickOpen, setPickOpen] = useState(false);
   const [suggested, setSuggested] = useState<number | null>(null);
   /** The checked exercise, line by line (or Silia asks for Lina's answer). */
   const [result, setResult] = useState<Result | null>(null);
@@ -153,6 +156,13 @@ export default function Board() {
   sessionIdRef.current = session?.id ?? null;
   /** Her page shown big, over everything (tap on the photo). */
   const [photoBig, setPhotoBig] = useState(false);
+  /** The correction takes the photo's place on the left page; a small arrow turns back to the photo. */
+  const [correctionView, setCorrectionView] = useState(true);
+  useEffect(() => {
+    if (result) setCorrectionView(true);
+  }, [result]);
+  /** A TV is only watched: no side buttons, the phone (Camera) is the remote control. */
+  const tv = useMemo(isTV, []);
 
   /** Tutor messages already shown (live or by the fallback poll). */
   const shownRef = useRef<Set<string>>(new Set());
@@ -353,7 +363,8 @@ export default function Board() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (msg && pollBaselineRef.current === null) pollBaselineRef.current = msg.id; // older than this Board: never replay
+        if (msg && pollBaselineRef.current === null)
+          pollBaselineRef.current = msg.id; // older than this Board: never replay
         else if (msg && msg.id !== pollBaselineRef.current && !shownRef.current.has(msg.id) && Date.now() - Date.parse(msg.created_at) < 90_000) {
           log('board', 'reply missed live, shown from the poll', msg.id);
           showMessageRef.current({ message_id: msg.id, kind: msg.kind, text: msg.text, language: msg.language, annotations: msg.annotations ?? [] });
@@ -518,6 +529,7 @@ export default function Board() {
         setPracticeView(false);
         setResult(null);
         setChoices(p.choices);
+        setPickOpen(p.choices.length > 0);
         setSuggested(p.suggested ?? null);
         setAnnotations(
           p.choices
@@ -695,6 +707,7 @@ export default function Board() {
     const turn = childTurn();
     setBusy(true);
     setChoices([]);
+    setPickOpen(false);
     setMood('thinking');
     const { error } = await requestHelp(session.id, { choice, action, turn });
     if (error) {
@@ -727,7 +740,9 @@ export default function Board() {
   const suggestedChoice = choices.find((c) => c.index === suggested) ?? choices[0];
   const guide = result?.mode === 'guide';
   const rtl = bubbleLang === 'ar' || bubbleLang === 'fus';
-  const statusLabel = t(!session ? 'En attente de la caméra' : session.status === 'paused' ? 'En pause' : scanning ? 'Je regarde ta page…' : 'Devoirs en cours');
+  const statusLabel = t(
+    !session ? 'En attente de la caméra' : session.status === 'paused' ? 'En pause' : scanning ? 'Je regarde ta page…' : 'Devoirs en cours',
+  );
   const statusColor = !session ? paper.inkFaint : session.status === 'paused' || scanning ? paper.yellow : paper.green;
   const next = result?.next;
   // What the left page's header shows: the exercises to choose from, the checked exercise, the active one, or the invitation.
@@ -738,7 +753,12 @@ export default function Board() {
   const chalkInstr = choices.length ? t('Lequel on commence ?') : result?.instr;
 
   // « Parler » on the Board itself (TV with a microphone, tablet, one phone): same path as the Camera's button.
-  const { talk, seconds, start: startTalk, stop: stopTalk } = useTalk({
+  const {
+    talk,
+    seconds,
+    start: startTalk,
+    stop: stopTalk,
+  } = useTalk({
     sessionId: session?.id,
     channel: () => channelRef.current,
     makeTurn: childTurn,
@@ -755,7 +775,7 @@ export default function Board() {
   });
 
   const rightCount = result ? result.lines.filter((l) => l.status === 'right').length : 0;
-  const avatarWidth = compact ? 84 : Math.min(200, Math.round(height * 0.27));
+  const avatarWidth = compact ? 84 : Math.min(result ? 130 : 200, Math.round(height * (result ? 0.18 : 0.27)));
   const dirOf = (text?: string) => (text && ARABIC.test(text) ? styles.rtl : null);
 
   /** Phone turned sideways: the photo keeps the whole left page; the exercise and the choices go to Silia's page. */
@@ -775,49 +795,108 @@ export default function Board() {
   const actionButtons = focus ? (
     <>
       {(['explain', 'solve'] as const).map((a) => (
-        <ChunkyButton key={a} label={t(ACTION_LABEL[a])} color={focus.action === a ? 'blue' : 'white'} size="sm" disabled={busy} onPress={() => help(undefined, a)} />
+        <ChunkyButton
+          key={a}
+          label={t(ACTION_LABEL[a])}
+          color={focus.action === a ? 'blue' : 'white'}
+          size="sm"
+          disabled={busy}
+          onPress={() => help(undefined, a)}
+        />
       ))}
-      <ChunkyButton label={t('Autre exercice')} color="white" size="sm" onPress={() => help(undefined, 'choose')} />
     </>
   ) : null;
+  const pickWide = width >= 700;
   const choicesEl = choices.length ? (
-                    <ScrollView style={[styles.choiceCol, side && styles.choiceColSide]} contentContainerStyle={[styles.choiceList, side && { padding: 0, paddingRight: 6 }]} scrollEnabled={!side}>
-                      {suggestedChoice ? (
-                        <ChunkyButton
-                          label={t('Oui, le {ex}', { ex: exerciseName(suggestedChoice) })}
-                          icon="check"
-                          color="green"
-                          size={compact ? 'sm' : 'md'}
-                          onPress={() => help(suggestedChoice)}
-                        />
-                      ) : null}
-                      {choices.map((c, i) => {
-                        const on = c.index === suggestedChoice?.index;
-                        return (
-                          <Pressable
-                            key={c.index}
-                            accessibilityRole="button"
-                            accessibilityLabel={t('Exercice {ex} : {title}', { ex: exerciseName(c), title: c.title })}
-                            onPress={() => help(c)}
-                            style={({ pressed }) => [
-                              styles.choice,
-                              { backgroundColor: STICKIES[i % STICKIES.length], transform: [{ rotate: `${i % 2 ? 1.2 : -1}deg` }] },
-                              on && styles.choiceOn,
-                              pressed && { transform: [{ translateX: 3 }, { translateY: 3 }], ...hardShadow(1) },
-                            ]}
-                          >
-                            <Text style={styles.choiceNumber}>{exerciseName(c)}</Text>
-                            <View style={{ flex: 1, minWidth: 0 }}>
-                              <Text style={[styles.choiceTitle, dirOf(c.title)]} numberOfLines={2}>
-                                {c.title}
-                              </Text>
-                              <Text style={styles.choiceStatus}>{t(CHOICE_STATUS[c.status])}</Text>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                  ) : null;
+    <ScrollView style={styles.pickScroll} contentContainerStyle={styles.pickGrid}>
+      {suggestedChoice ? (
+        <ChunkyButton
+          label={t('Oui, le {ex}', { ex: exerciseName(suggestedChoice) })}
+          icon="check"
+          color="green"
+          size={compact ? 'sm' : 'md'}
+          onPress={() => help(suggestedChoice)}
+          style={{ width: '100%' }}
+        />
+      ) : null}
+      {choices.map((c, i) => {
+        const on = c.index === suggestedChoice?.index;
+        return (
+          <Pressable
+            key={c.index}
+            accessibilityRole="button"
+            accessibilityLabel={t('Exercice {ex} : {title}', { ex: exerciseName(c), title: c.title })}
+            onPress={() => help(c)}
+            style={({ pressed }) => [
+              styles.choice,
+              { width: pickWide ? '31.5%' : '100%' },
+              { backgroundColor: STICKIES[i % STICKIES.length], transform: [{ rotate: `${i % 2 ? 1 : -0.8}deg` }] },
+              on && styles.choiceOn,
+              pressed && { transform: [{ translateX: 3 }, { translateY: 3 }], ...hardShadow(1) },
+            ]}
+          >
+            <Text style={styles.choiceNumber}>{exerciseName(c)}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.choiceTitle, dirOf(c.title)]} numberOfLines={2}>
+                {c.title}
+              </Text>
+              <Text style={styles.choiceStatus}>{t(CHOICE_STATUS[c.status])}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  ) : null;
+  /** Long sentences get a smaller font, so the Post-it never eats the correction below it. */
+  const speechSize = bubble.length > 260 ? styles.speechSmall : bubble.length > 150 ? styles.speechMedium : null;
+  /** TV at 720p, laptops: the index tabs get shorter so all of them stay on screen. */
+  const shortTabs = !compact && height < 900;
+
+  /** Her answers, checked: an index card with ✓ and ✗, on her page in place of the photo. */
+  const correctionEl = result ? (
+    <View style={[styles.indexCard, styles.indexCardPage, compact && styles.cardCompact]}>
+      <View style={styles.indexRule} />
+      <Text style={styles.cardLabel}>{t(result.mode === 'solution' ? 'Solution' : 'Correction')}</Text>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: compact ? 3 : 8 }}>
+        {result.lines.slice(0, 12).map((l, i) =>
+          l.solution ? (
+            // « Solution »: the question (may be long) and, on its own line and never cut, the right answer
+            <View key={i} style={styles.lineRow}>
+              <Text style={[styles.mark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.lineText, compact && styles.lineTextCompact, dirOf(l.q)]} numberOfLines={3}>
+                  {l.q}
+                </Text>
+                {l.status === 'wrong' && l.a ? (
+                  <Text style={[styles.lineMine, compact && styles.lineTextCompact]}>{t('Ta réponse : {a}', { a: l.a })}</Text>
+                ) : null}
+                <Text style={[styles.lineAnswer, compact && styles.lineTextCompact, dirOf(l.solution)]}>→ {l.solution}</Text>
+              </View>
+            </View>
+          ) : (
+            <View key={i} style={styles.lineRow}>
+              <Text style={[styles.mark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
+              <Text
+                style={[
+                  styles.lineText,
+                  compact && styles.lineTextCompact,
+                  dirOf(l.q),
+                  l.status === 'wrong' && styles.lineWrong,
+                  l.status === 'empty' && { opacity: 0.55 },
+                ]}
+                numberOfLines={3}
+              >
+                {lineText(l)}
+              </Text>
+            </View>
+          ),
+        )}
+      </ScrollView>
+      {/* Silia can misread: the child may say so */}
+      <Text style={[styles.aiNote, compact && styles.aiNoteCompact]}>{t('{name} peut se tromper. Tu penses avoir raison ? Dis-le-lui !', { name: TUTOR_NAME })}</Text>
+    </View>
+  ) : null;
+  const showCorrection = !!result && !choices.length && correctionView && !(practice && practiceView);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -826,7 +905,12 @@ export default function Board() {
         {/* On the desk, above the binder: Silia's name taped on, the state on a sticky note, a few desk tools. */}
         <View style={[styles.topRow, compact && { minHeight: 36, gap: 8 }]}>
           {/* the state, as a dot: green = homework in progress, yellow = looking / paused, grey = waiting for the camera */}
-          <View accessible accessibilityRole="image" accessibilityLabel={statusLabel} style={[styles.stateDot, compact && styles.stateDotCompact, { backgroundColor: statusColor }]} />
+          <View
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel={statusLabel}
+            style={[styles.stateDot, compact && styles.stateDotCompact, { backgroundColor: statusColor }]}
+          />
           {session ? (
             <View style={[styles.answerBar, guide && styles.answerBarGuide, compact && styles.answerBarCompact]}>
               <PaperInput
@@ -839,7 +923,14 @@ export default function Board() {
                 maxLength={200}
               />
               {typed.trim() ? (
-                <Chunky onPress={sendAnswer} color="green" radius={12} depth={4} style={[styles.barButton, compact && styles.barButtonCompact]} accessibilityLabel={t('Envoyer ma réponse')}>
+                <Chunky
+                  onPress={sendAnswer}
+                  color="green"
+                  radius={12}
+                  depth={4}
+                  style={[styles.barButton, compact && styles.barButtonCompact]}
+                  accessibilityLabel={t('Envoyer ma réponse')}
+                >
                   <Icon name="send" size={compact ? 18 : 22} color={paper.ink} />
                 </Chunky>
               ) : null}
@@ -864,10 +955,19 @@ export default function Board() {
             </Text>
           ) : null}
           <View style={{ flex: 1 }} />
-          {focus && !choices.length && !compact ? (
+          {/* what to do with this exercise: on the desk, next to « Exercices » (on a small screen, under the correction) */}
+          {focus && !choices.length && !compact ? <View style={styles.deskActions}>{actionButtons}</View> : null}
+          {session && (photo || choices.length) ? (
             <>
-              <View style={styles.deskActions}>{actionButtons}</View>
-              <View style={styles.deskDivider} />
+              <ChunkyButton
+                label={t('Exercices')}
+                icon="list"
+                color={choices.length ? 'yellow' : 'white'}
+                size="sm"
+                disabled={!active || (busy && !choices.length)}
+                onPress={() => (choices.length ? setPickOpen(true) : help(undefined, 'choose'))}
+              />
+              {solo ? null : <View style={styles.deskDivider} />}
             </>
           ) : null}
           {solo ? (
@@ -898,7 +998,14 @@ export default function Board() {
 
                 <View style={styles.workRow}>
                   <View style={styles.photoArea}>
-                    {practice && practiceView ? (
+                    {showCorrection ? (
+                      <View style={styles.correctionSpot}>
+                        {correctionEl}
+                        <View style={styles.flipSpotCard}>
+                          <ChunkyButton label={`‹ ${t('Photo')}`} color="white" size="sm" onPress={() => setCorrectionView(false)} />
+                        </View>
+                      </View>
+                    ) : practice && practiceView ? (
                       // the similar exercise, written on a small chalkboard pinned to the page
                       <View style={styles.miniBoard}>
                         <PracticeBoard practice={practice} />
@@ -907,12 +1014,29 @@ export default function Board() {
                       // her page as a Polaroid taped on the notebook
                       <View style={[styles.photoFrame, compact && styles.photoFrameCompact]}>
                         <Washi color="#B9D7FF" width={compact ? 60 : 90} tilt={6} style={styles.photoTape} />
-                        <Pressable accessibilityRole="button" accessibilityLabel={t('Agrandir la photo')} onPress={() => setPhotoBig(true)} style={styles.photoTap}>
-                          <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={sessionRotation ?? 0} annotations={shown} scanning={scanning} />
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={t('Agrandir la photo')}
+                          onPress={() => setPhotoBig(true)}
+                          style={styles.photoTap}
+                        >
+                          <AnnotatedPhoto
+                            uri={photo.uri}
+                            width={photo.width}
+                            height={photo.height}
+                            rotation={sessionRotation ?? 0}
+                            annotations={shown}
+                            scanning={scanning}
+                          />
                         </Pressable>
                         <View style={styles.rotateSpot}>
                           <DeskButton glyph="↻" label={t('Tourner la page')} onPress={rotate} />
                         </View>
+                        {result && !choices.length ? (
+                          <View style={styles.flipSpot}>
+                            <ChunkyButton label={`${t('Correction')} ›`} color="white" size="sm" onPress={() => setCorrectionView(true)} />
+                          </View>
+                        ) : null}
                       </View>
                     ) : (
                       <View style={styles.emptyPhoto}>
@@ -921,7 +1045,12 @@ export default function Board() {
                     )}
                     {practice ? (
                       <View style={styles.practiceTabs}>
-                        <ChunkyButton label={t(practiceView ? 'Voir la photo' : 'Exercice similaire')} color="white" size="sm" onPress={() => setPracticeView((v) => !v)} />
+                        <ChunkyButton
+                          label={t(practiceView ? 'Voir la photo' : 'Exercice similaire')}
+                          color="white"
+                          size="sm"
+                          onPress={() => setPracticeView((v) => !v)}
+                        />
                         <ChunkyButton
                           label={t('Fermer')}
                           color="white"
@@ -934,9 +1063,6 @@ export default function Board() {
                       </View>
                     ) : null}
                   </View>
-
-                  {/* several exercises on the page: one sticky note each, Silia's suggestion on top */}
-                  {side ? null : choicesEl}
                 </View>
               </View>
             </NotebookPage>
@@ -949,51 +1075,16 @@ export default function Board() {
                 {/* what she says: a Post-it taped on the page */}
                 <View style={[styles.speech, compact && styles.speechCompact]}>
                   <Washi color="#FFB4A2" width={compact ? 54 : 80} tilt={4} style={styles.speechTape} />
-                  <Text style={[styles.speechText, compact && styles.speechTextCompact, rtl && styles.rtlSpeech]}>{bubble}</Text>
+                  <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator>
+                    <Text style={[styles.speechText, speechSize, compact && styles.speechTextCompact, rtl && styles.rtlSpeech]}>{bubble}</Text>
+                  </ScrollView>
                 </View>
 
                 <View style={styles.teacherRow}>
                   <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.teacherCol} keyboardShouldPersistTaps="handled">
                     {side ? headerEl : null}
-                    {side ? choicesEl : null}
-                    {/* her answers, checked: an index card with ✓ and ✗ */}
-                    {result && !choices.length ? (
-                      <View style={[styles.indexCard, compact && styles.cardCompact]}>
-                        <View style={styles.indexRule} />
-                        <Text style={styles.cardLabel}>{t(result.mode === 'solution' ? 'Solution' : 'Correction')}</Text>
-                        {result.lines.slice(0, 8).map((l, i) =>
-                          l.solution ? (
-                            // « Solution »: the question (may be long) and, on its own line and never cut, the right answer
-                            <View key={i} style={styles.lineRow}>
-                              <Text style={[styles.mark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
-                              <View style={{ flex: 1, minWidth: 0 }}>
-                                <Text style={[styles.lineText, compact && styles.lineTextCompact, dirOf(l.q)]} numberOfLines={3}>
-                                  {l.q}
-                                </Text>
-                                {l.status === 'wrong' && l.a ? (
-                                  <Text style={[styles.lineMine, compact && styles.lineTextCompact]}>{t('Ta réponse : {a}', { a: l.a })}</Text>
-                                ) : null}
-                                <Text style={[styles.lineAnswer, compact && styles.lineTextCompact, dirOf(l.solution)]}>→ {l.solution}</Text>
-                              </View>
-                            </View>
-                          ) : (
-                            <View key={i} style={styles.lineRow}>
-                              <Text style={[styles.mark, { color: MARK_COLOR[l.status] }]}>{MARK[l.status]}</Text>
-                              <Text
-                                style={[styles.lineText, compact && styles.lineTextCompact, dirOf(l.q), l.status === 'wrong' && styles.lineWrong, l.status === 'empty' && { opacity: 0.55 }]}
-                                numberOfLines={3}
-                              >
-                                {lineText(l)}
-                              </Text>
-                            </View>
-                          ),
-                        )}
-                      </View>
-                    ) : null}
-
-
                     {/* what to do next with this exercise */}
-                    {focus && !choices.length && (compact || (next && result)) ? (
+                    {focus && !choices.length ? (
                       <View style={styles.actions}>
                         {next && result ? (
                           <ChunkyButton
@@ -1011,11 +1102,11 @@ export default function Board() {
                   {/* Silia herself, in a Polaroid clipped to her page (on a sideways phone, only while her page is empty:
                       the cards need the whole width) */}
                   {side && (choices.length || result || focus) ? null : (
-                  <View style={styles.avatarSpot}>
-                    <Polaroid caption={TUTOR_NAME} width={avatarWidth} tilt={3}>
-                      <Avatar mood={mood} reaction={reaction} language={bubbleLang} />
-                    </Polaroid>
-                  </View>
+                    <View style={styles.avatarSpot}>
+                      <Polaroid caption={TUTOR_NAME} width={avatarWidth} tilt={3}>
+                        <Avatar mood={mood} reaction={reaction} language={bubbleLang} />
+                      </Polaroid>
+                    </View>
                   )}
                 </View>
               </View>
@@ -1023,27 +1114,53 @@ export default function Board() {
           </View>
 
           {/* binder index tabs sticking out of the right edge: the big actions */}
-          <View style={[styles.tabs, compact && styles.tabsCompact, !landscape && styles.tabsRow]}>
-            {solo ? null : (
+          {tv ? null : (
+            <View style={[styles.tabs, shortTabs && styles.tabsShort, compact && styles.tabsCompact, !landscape && styles.tabsRow]}>
+              {solo ? null : (
+                <IndexTab
+                  icon="eye"
+                  label={t('{name}, regarde', { name: TUTOR_NAME })}
+                  color={paper.yellow}
+                  primary
+                  compact={compact}
+                  short={shortTabs}
+                  onPress={lookNow}
+                  loading={busy && scanning}
+                  disabled={!active}
+                />
+              )}
+              {(focus || result) && !choices.length ? (
+                <IndexTab
+                  icon="copy"
+                  label={t('Exercice similaire')}
+                  color="#FF9EB5"
+                  compact={compact}
+                  short={shortTabs}
+                  onPress={() => help(undefined, 'similar')}
+                  disabled={busy || !active}
+                />
+              ) : null}
+              {solutionOn && (focus || result) && !choices.length ? (
+                <IndexTab
+                  icon="key"
+                  label={t('Solution')}
+                  color={paper.green}
+                  compact={compact}
+                  short={shortTabs}
+                  onPress={() => help(undefined, 'solution')}
+                  disabled={busy || !active}
+                />
+              ) : null}
               <IndexTab
-                icon="eye"
-                label={t('{name}, regarde', { name: TUTOR_NAME })}
-                color={paper.yellow}
-                primary
+                icon="speaker"
+                label={t('Répéter')}
+                color={paper.blue}
                 compact={compact}
-                onPress={lookNow}
-                loading={busy && scanning}
-                disabled={!active}
+                short={shortTabs}
+                onPress={() => speak(lastTextRef.current, lastVoiceRef.current)}
               />
-            )}
-            {(focus || result) && !choices.length ? (
-              <IndexTab icon="copy" label={t('Exercice similaire')} color="#FF9EB5" compact={compact} onPress={() => help(undefined, 'similar')} disabled={busy || !active} />
-            ) : null}
-            {solutionOn && (focus || result) && !choices.length ? (
-              <IndexTab icon="key" label={t('Solution')} color={paper.green} compact={compact} onPress={() => help(undefined, 'solution')} disabled={busy || !active} />
-            ) : null}
-            <IndexTab icon="speaker" label={t('Répéter')} color={paper.blue} compact={compact} onPress={() => speak(lastTextRef.current, lastVoiceRef.current)} />
-          </View>
+            </View>
+          )}
         </View>
       </Desk>
 
@@ -1051,7 +1168,14 @@ export default function Board() {
         <Modal visible={photoBig} transparent animationType="fade" onRequestClose={() => setPhotoBig(false)} supportedOrientations={['landscape', 'portrait']}>
           <Pressable accessibilityRole="button" accessibilityLabel={t('Fermer')} onPress={() => setPhotoBig(false)} style={styles.bigBackdrop}>
             <View style={styles.bigFrame}>
-              <AnnotatedPhoto uri={photo.uri} width={photo.width} height={photo.height} rotation={sessionRotation ?? 0} annotations={shown} scanning={scanning} />
+              <AnnotatedPhoto
+                uri={photo.uri}
+                width={photo.width}
+                height={photo.height}
+                rotation={sessionRotation ?? 0}
+                annotations={shown}
+                scanning={scanning}
+              />
             </View>
             <View style={styles.bigClose}>
               <ChunkyButton label={t('Fermer')} color="white" size="sm" onPress={() => setPhotoBig(false)} />
@@ -1059,6 +1183,28 @@ export default function Board() {
           </Pressable>
         </Modal>
       ) : null}
+
+      <Modal
+        visible={pickOpen && choices.length > 0}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickOpen(false)}
+        supportedOrientations={['landscape', 'portrait']}
+      >
+        <View style={styles.bigBackdrop}>
+          <View style={[styles.pickCard, { width: Math.min(960, width - 24), maxHeight: height - 24 }, compact && styles.pickCardCompact]}>
+            <Washi width={110} tilt={-3} style={styles.startTape} />
+            <View style={styles.pickHead}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.pickTitle, compact && styles.exTitleCompact]}>{t('Je vois {n} exercices', { n: choices.length })}</Text>
+                <Text style={[styles.instr, compact && styles.instrCompact]}>{t('Lequel on commence ?')}</Text>
+              </View>
+              <ChunkyButton label={t('Fermer')} color="white" size="sm" onPress={() => setPickOpen(false)} />
+            </View>
+            {choicesEl}
+          </View>
+        </View>
+      </Modal>
 
       {!started ? (
         <View style={styles.startOverlay}>
@@ -1070,6 +1216,7 @@ export default function Board() {
             <View style={styles.startTexts}>
               <Text style={styles.startHint}>{t('Active {name}, ta maîtresse.', { name: TUTOR_NAME })}</Text>
               <ChunkyButton label={t('Commencer les devoirs')} icon="play" onPress={start} />
+              <Text style={styles.startNote}>{t('{name} est une IA : elle peut mal lire une photo ou se tromper. Vérifie ses corrections : c’est une aide aux devoirs, elle ne remplace ni l’enseignant ni toi.', { name: TUTOR_NAME })}</Text>
             </View>
           </View>
         </View>
@@ -1081,7 +1228,13 @@ export default function Board() {
 const ARABIC = /[؀-ۿ]/;
 const STICKIES = [paper.stickyYellow, paper.stickyPink, paper.stickyGreen, paper.stickyBlue];
 const MARK: Record<ResultLine['status'], string> = { right: '✓', wrong: '✗', unsure: '?', open: '?', empty: '·' };
-const MARK_COLOR: Record<ResultLine['status'], string> = { right: '#1E8E4E', wrong: '#D63B30', unsure: paper.blueInk, open: paper.blueInk, empty: paper.inkFaint };
+const MARK_COLOR: Record<ResultLine['status'], string> = {
+  right: '#1E8E4E',
+  wrong: '#D63B30',
+  unsure: paper.blueInk,
+  open: paper.blueInk,
+  empty: paper.inkFaint,
+};
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#EFE6DD' },
@@ -1089,11 +1242,33 @@ const styles = StyleSheet.create({
   deskPadCompact: { padding: 8, paddingTop: 4, gap: 6 },
   // desk top
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, zIndex: 2 },
-  nameLabel: { backgroundColor: paper.card, borderWidth: 2, borderColor: paper.ink, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 4, transform: [{ rotate: '-2deg' }], ...hardShadow(4) },
+  nameLabel: {
+    backgroundColor: paper.card,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    transform: [{ rotate: '-2deg' }],
+    ...hardShadow(4),
+  },
   nameTape: { position: 'absolute', top: -12, left: -14 },
   name: { ...font.bold, color: paper.ink, fontSize: 28 },
   nameCompact: { fontSize: 16 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 2, borderColor: paper.ink, borderRadius: 3, borderBottomRightRadius: 12, paddingHorizontal: 12, height: 38, transform: [{ rotate: '1deg' }], ...hardShadow(3), flexShrink: 1 },
+  status: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 3,
+    borderBottomRightRadius: 12,
+    paddingHorizontal: 12,
+    height: 38,
+    transform: [{ rotate: '1deg' }],
+    ...hardShadow(3),
+    flexShrink: 1,
+  },
   statusDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: paper.ink },
   statusText: { ...font.semi, color: paper.ink, fontSize: 15 },
   problem: { ...font.medium, color: '#C0392B', fontSize: 13, maxWidth: 260 },
@@ -1121,7 +1296,18 @@ const styles = StyleSheet.create({
   rightInner: { flex: 1, padding: 18, gap: 14, minHeight: 0 },
   innerCompact: { paddingLeft: 40, paddingRight: 8, padding: 8, gap: 6 },
   // left page
-  headerCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: paper.card, borderWidth: 2, borderColor: paper.ink, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 12, ...hardShadow(3) },
+  headerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: paper.card,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    ...hardShadow(3),
+  },
   headerCardCompact: { paddingVertical: 5, paddingHorizontal: 8, gap: 6 },
   headerTape: { position: 'absolute', top: -10, left: 16, height: 16 },
   headLine: { flex: 1, minWidth: 0, lineHeight: 22 },
@@ -1152,22 +1338,55 @@ const styles = StyleSheet.create({
   instrCompact: { fontSize: 12 },
   workRow: { flex: 1, flexDirection: 'row', gap: 14, minHeight: 0 },
   photoArea: { flex: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center' },
-  photoFrame: { flex: 1, alignSelf: 'stretch', backgroundColor: paper.card, borderWidth: 2, borderStyle: 'solid', borderColor: paper.ink, borderRadius: 4, padding: 10, paddingBottom: 26, transform: [{ rotate: '-0.8deg' }], ...hardShadow(5) },
+  photoFrame: {
+    flex: 1,
+    alignSelf: 'stretch',
+    backgroundColor: paper.card,
+    borderWidth: 2,
+    borderStyle: 'solid',
+    borderColor: paper.ink,
+    borderRadius: 4,
+    padding: 10,
+    paddingBottom: 26,
+    transform: [{ rotate: '-0.8deg' }],
+    ...hardShadow(5),
+  },
   photoFrameCompact: { padding: 3, paddingBottom: 8, transform: [{ rotate: '-0.4deg' }] },
   photoTap: { flex: 1 },
   leftPageCompact: { flex: 1.35 },
   leftInnerSide: { paddingLeft: 26, paddingRight: 8, paddingVertical: 8 },
-  choiceColSide: { width: '100%', flexGrow: 0 },
   bigBackdrop: { flex: 1, backgroundColor: 'rgba(45,49,66,0.85)', padding: 12, alignItems: 'center', justifyContent: 'center' },
-  bigFrame: { flex: 1, alignSelf: 'stretch', backgroundColor: paper.card, borderWidth: 3, borderColor: paper.ink, borderRadius: 6, padding: 8, ...hardShadow(6) },
+  bigFrame: {
+    flex: 1,
+    alignSelf: 'stretch',
+    backgroundColor: paper.card,
+    borderWidth: 3,
+    borderColor: paper.ink,
+    borderRadius: 6,
+    padding: 8,
+    ...hardShadow(6),
+  },
   bigClose: { position: 'absolute', top: 18, right: 18 },
   photoTape: { position: 'absolute', top: -10, right: 30, zIndex: 3 },
   rotateSpot: { position: 'absolute', right: -10, bottom: -10, zIndex: 3 },
-  emptyPhoto: { flex: 1, alignSelf: 'stretch', borderWidth: 2.5, borderStyle: 'dashed', borderColor: paper.inkFaint, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  emptyPhoto: {
+    flex: 1,
+    alignSelf: 'stretch',
+    borderWidth: 2.5,
+    borderStyle: 'dashed',
+    borderColor: paper.inkFaint,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   miniBoard: { flex: 1, alignSelf: 'stretch', backgroundColor: paper.chalkboard, borderWidth: 8, borderColor: paper.wood, borderRadius: 10, ...hardShadow(5) },
   practiceTabs: { position: 'absolute', top: -6, right: 0, flexDirection: 'row', gap: 8, zIndex: 4 },
-  choiceCol: { width: 250, flexGrow: 0 },
-  choiceList: { gap: 12, padding: 4, paddingRight: 8 },
+  pickCard: { backgroundColor: paper.page, borderWidth: 3, borderColor: paper.ink, borderRadius: 10, padding: 22, paddingTop: 26, gap: 16, ...hardShadow(8) },
+  pickCardCompact: { padding: 12, paddingTop: 16, gap: 10 },
+  pickHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pickTitle: { ...font.bold, color: paper.ink, fontSize: 24 },
+  pickScroll: { flexGrow: 0, flexShrink: 1 },
+  pickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, padding: 6, paddingBottom: 12 },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1180,20 +1399,51 @@ const styles = StyleSheet.create({
     ...hardShadow(4),
   },
   choiceOn: { borderWidth: 3, ...hardShadow(6) },
-  choiceNumber: { ...font.bold, minWidth: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: paper.ink, backgroundColor: paper.card, color: paper.ink, fontSize: 17, textAlign: 'center', lineHeight: 30, overflow: 'hidden' },
+  choiceNumber: {
+    ...font.bold,
+    minWidth: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    backgroundColor: paper.card,
+    color: paper.ink,
+    fontSize: 17,
+    textAlign: 'center',
+    lineHeight: 30,
+    overflow: 'hidden',
+  },
   choiceTitle: { ...font.semi, color: paper.ink, fontSize: 16, lineHeight: 20 },
   choiceStatus: { ...font.regular, color: paper.inkSoft, fontSize: 13 },
   // right page
-  speech: { backgroundColor: paper.stickyYellow, borderWidth: 2, borderColor: paper.ink, borderRadius: 3, borderBottomRightRadius: 22, padding: 18, paddingTop: 20, transform: [{ rotate: '-1deg' }], ...hardShadow(5) },
+  speech: {
+    maxHeight: '50%',
+    flexShrink: 1,
+    backgroundColor: paper.stickyYellow,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 3,
+    borderBottomRightRadius: 22,
+    padding: 18,
+    paddingTop: 20,
+    transform: [{ rotate: '-1deg' }],
+    ...hardShadow(5),
+  },
   speechCompact: { padding: 8, paddingTop: 10 },
   speechTape: { position: 'absolute', top: -12, alignSelf: 'center' },
   speechText: { ...font.semi, color: paper.ink, fontSize: 24, lineHeight: 32 },
+  speechMedium: { fontSize: 20, lineHeight: 27 },
+  speechSmall: { fontSize: 18, lineHeight: 24 },
   speechTextCompact: { fontSize: 14, lineHeight: 18 },
   rtlSpeech: { writingDirection: 'rtl', textAlign: 'right', fontSize: 27, lineHeight: 42 },
   teacherRow: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 12, minHeight: 0 },
   teacherCol: { gap: 14, padding: 4, paddingBottom: 10 },
   indexCard: { backgroundColor: paper.card, borderWidth: 2, borderColor: paper.ink, borderRadius: 6, padding: 14, paddingTop: 10, gap: 6, ...hardShadow(5) },
   indexRule: { position: 'absolute', left: 0, right: 0, top: 38, height: 2, backgroundColor: paper.margin },
+  indexCardPage: { flex: 1, alignSelf: 'stretch', transform: [{ rotate: '-0.4deg' }] },
+  correctionSpot: { flex: 1, alignSelf: 'stretch', minHeight: 0 },
+  flipSpot: { position: 'absolute', top: -8, left: -6, zIndex: 4 },
+  flipSpotCard: { position: 'absolute', bottom: -8, right: -6, zIndex: 4 },
   cardCompact: { padding: 8, gap: 3 },
   cardLabel: { ...font.hand, color: paper.blueInk, fontSize: 24, marginBottom: 4 },
   lineRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
@@ -1204,7 +1454,15 @@ const styles = StyleSheet.create({
   lineMine: { ...font.medium, color: '#D63B30', fontSize: 15, lineHeight: 20, textDecorationLine: 'line-through' },
   lineWrong: { color: '#D63B30', textDecorationLine: 'underline', textDecorationStyle: 'dotted' },
   answerBar: { flex: 1, maxWidth: 420, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
-  answerBarGuide: { backgroundColor: paper.stickyGreen, borderWidth: 2, borderColor: paper.ink, borderRadius: 14, padding: 4, paddingRight: 8, ...hardShadow(3) },
+  answerBarGuide: {
+    backgroundColor: paper.stickyGreen,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 14,
+    padding: 4,
+    paddingRight: 8,
+    ...hardShadow(3),
+  },
   answerBarCompact: { gap: 6, maxWidth: 360 },
   answerTop: { flex: 1, minWidth: 0, minHeight: 46, fontSize: 18, paddingVertical: 6 },
   answerTopCompact: { minHeight: 36, fontSize: 15, paddingHorizontal: 10 },
@@ -1222,10 +1480,21 @@ const styles = StyleSheet.create({
   rtl: { writingDirection: 'rtl', textAlign: 'right' },
   // index tabs
   tabs: { gap: 14, paddingTop: 34, marginLeft: -3, zIndex: 0 },
+  tabsShort: { gap: 10, paddingTop: 18 },
   tabsCompact: { gap: 6, paddingTop: 12 },
   tabsRow: { flexDirection: 'row', paddingTop: 8, marginLeft: 0 },
   // start
-  startOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(45,49,66,0.35)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  startOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(45,49,66,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
   startCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1240,5 +1509,8 @@ const styles = StyleSheet.create({
   },
   startTape: { position: 'absolute', top: -12, left: '40%' },
   startTexts: { gap: 18, maxWidth: 380 },
+  startNote: { ...font.regular, color: paper.inkSoft, fontSize: 14, lineHeight: 19 },
+  aiNote: { ...font.medium, color: paper.inkSoft, fontSize: 14, lineHeight: 19, borderTopWidth: 1.5, borderStyle: 'dashed', borderColor: paper.inkFaint, paddingTop: 6 },
+  aiNoteCompact: { fontSize: 11, lineHeight: 14, paddingTop: 3 },
   startHint: { ...font.semi, color: paper.ink, fontSize: 24, lineHeight: 30 },
 });

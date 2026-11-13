@@ -5,6 +5,7 @@ import { FocusPressable as Pressable } from '@/components/focus-pressable';
 
 import { RoleArt } from '@/components/illustrations';
 import { Body, Button, Card, ErrorText, Field, Screen, Title } from '@/components/ui';
+import { LegalLinks } from '@/components/legal-page';
 import { authRedirect, sendPasswordReset, signInWithGoogle } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { colors, space } from '@/lib/theme';
@@ -13,7 +14,14 @@ import { font, paper } from '@/lib/paper-theme';
 
 type Mode = 'signIn' | 'signUp' | 'forgot';
 
-const TITLE: Record<Mode, string> = { signIn: 'Espace parent', signUp: 'Créer un compte', forgot: 'Mot de passe oublié' };
+/** Google sign-in stays hidden until the Google app is published (needs a home page + privacy policy). */
+const GOOGLE_ENABLED = false;
+
+const TITLE: Record<Mode, string> = {
+  signIn: 'Espace parent',
+  signUp: 'Créer un compte',
+  forgot: 'Mot de passe oublié',
+};
 
 const friendly = (m: string) =>
   /invalid login/i.test(m)
@@ -24,7 +32,21 @@ const friendly = (m: string) =>
         ? t('La connexion Google n’est pas encore activée sur le serveur.')
         : m;
 
+/** The sign-in page (Parent role chosen, nobody signed in yet). */
 export function SignIn({ onBack }: { onBack: () => void }) {
+  return (
+    <Screen center>
+      <SignInBox art />
+      <Button label={t('Changer d’appareil')} variant="ghost" onPress={onBack} />
+    </Screen>
+  );
+}
+
+/**
+ * The parent's sign-in box: e-mail, password, create an account, forgotten password.
+ * Also shown directly on the first screen of a big screen; `onSignedIn` then opens the parent space.
+ */
+export function SignInBox({ art = false, onSignedIn }: { art?: boolean; onSignedIn?: () => void }) {
   const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,8 +69,12 @@ export function SignIn({ onBack }: { onBack: () => void }) {
         await sendPasswordReset(email);
         setInfo(t('Si ce compte existe, un lien vient d’être envoyé. Ouvre-le sur cet appareil.'));
       } else if (mode === 'signIn') {
-        const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error: e } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
         if (e) throw e;
+        onSignedIn?.();
       } else {
         const { data, error: e } = await supabase.auth.signUp({
           email: email.trim(),
@@ -57,6 +83,7 @@ export function SignIn({ onBack }: { onBack: () => void }) {
         });
         if (e) throw e;
         if (!data.session) setInfo(t('Compte créé. Confirme ton e-mail, puis connecte-toi.'));
+        else onSignedIn?.();
       }
     } catch (e) {
       setError(friendly((e as Error).message));
@@ -80,15 +107,15 @@ export function SignIn({ onBack }: { onBack: () => void }) {
   const canSubmit = mode === 'forgot' ? /\S+@\S+/.test(email) : /\S+@\S+/.test(email) && password.length >= 6;
 
   return (
-    <Screen center>
-      <View style={styles.hero}>
-        <RoleArt name="parent" size={140} />
+    <View style={styles.box}>
+      <View style={[styles.hero, !art && styles.heroRow]}>
+        <RoleArt name="parent" size={art ? 140 : 64} />
         <Title>{t(TITLE[mode])}</Title>
         {mode === 'forgot' ? <Body muted>{t('On t’envoie un lien pour choisir un nouveau mot de passe.')}</Body> : null}
       </View>
 
       <Card>
-        {mode !== 'forgot' ? (
+        {GOOGLE_ENABLED && mode !== 'forgot' ? (
           <>
             <Button label={t('Continuer avec Google')} variant="light" onPress={google} loading={busy === 'google'} disabled={!!busy} />
             <View style={styles.divider}>
@@ -131,18 +158,39 @@ export function SignIn({ onBack }: { onBack: () => void }) {
           <Text style={styles.link}>{t(mode === 'signIn' ? 'Créer un compte' : 'Se connecter')}</Text>
         </Text>
       </Pressable>
-      <Button label={t('Changer d’appareil')} variant="ghost" onPress={onBack} />
-    </Screen>
+      <LegalLinks lead={t('En continuant, tu acceptes :')} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  box: { gap: space.lg },
   hero: { alignItems: 'center', gap: space.sm },
+  heroRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: space.md,
+  },
   divider: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  line: { flex: 1, borderTopWidth: 1.5, borderStyle: 'dashed', borderColor: paper.inkFaint },
+  line: {
+    flex: 1,
+    borderTopWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: paper.inkFaint,
+  },
   or: { ...font.hand, color: paper.inkSoft, fontSize: 20 },
   forgot: { alignSelf: 'flex-end', paddingVertical: space.xs },
-  link: { ...font.semi, color: paper.blueInk, fontSize: 15, textDecorationLine: 'underline' },
+  link: {
+    ...font.semi,
+    color: paper.blueInk,
+    fontSize: 15,
+    textDecorationLine: 'underline',
+  },
   switch: { alignSelf: 'center', paddingVertical: space.sm },
-  switchText: { ...font.medium, color: paper.inkSoft, fontSize: 15, textAlign: 'center' },
+  switchText: {
+    ...font.medium,
+    color: paper.inkSoft,
+    fontSize: 15,
+    textAlign: 'center',
+  },
 });

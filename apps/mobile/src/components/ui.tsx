@@ -9,14 +9,15 @@ import { space } from '@/lib/theme';
 
 // The phone's simple screens (sign-in, pairing, setup…) as a page of a spiral notebook.
 
-export function Screen({ children, center = false }: { children: ReactNode; center?: boolean }) {
+/** `wide`: a larger page for big screens (two columns side by side). */
+export function Screen({ children, center = false, wide = false }: { children: ReactNode; center?: boolean; wide?: boolean }) {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
       <NotebookPage fill>
         <Spiral />
         <ScrollView contentContainerStyle={[styles.scroll, center && styles.center]} keyboardShouldPersistTaps="handled">
-          <View style={styles.content}>{children}</View>
+          <View style={[styles.content, wide && styles.contentWide]}>{children}</View>
         </ScrollView>
       </NotebookPage>
     </SafeAreaView>
@@ -95,6 +96,7 @@ const styles = StyleSheet.create({
   scroll: { flexGrow: 1, paddingLeft: MARGIN_X + 18, paddingRight: 22, paddingTop: space.md, paddingBottom: space.xl },
   center: { justifyContent: 'center' },
   content: { width: '100%', maxWidth: 520, alignSelf: 'center', gap: space.lg },
+  contentWide: { maxWidth: 1040 },
   titleWrap: { alignSelf: 'flex-start' },
   highlighter: { position: 'absolute', left: -6, right: -8, bottom: 6, height: 16, borderRadius: 4, backgroundColor: paper.yellow, opacity: 0.55, transform: [{ rotate: '-1.2deg' }] },
   title: { ...font.bold, color: paper.ink, fontSize: 32, lineHeight: 40 },

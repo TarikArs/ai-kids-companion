@@ -125,6 +125,7 @@ export function IndexTab({
   loading = false,
   primary = false,
   compact = false,
+  short = false,
 }: {
   icon: IconName;
   label: string;
@@ -134,6 +135,8 @@ export function IndexTab({
   loading?: boolean;
   primary?: boolean;
   compact?: boolean;
+  /** A shorter tab, for screens with little height (TV at 720p, laptop). */
+  short?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   return (
@@ -148,14 +151,14 @@ export function IndexTab({
         const d = disabled ? 6 : pressed ? 1 : hover ? 2 : 6;
         return [
           styles.tab,
-          { backgroundColor: color, minHeight: compact ? 52 : primary ? 104 : 86, width: compact ? 58 : primary ? 132 : 118 },
+          { backgroundColor: color, minHeight: compact ? 52 : short ? (primary ? 78 : 62) : primary ? 104 : 86, width: compact ? 58 : short ? (primary ? 122 : 108) : primary ? 132 : 118 },
           { transform: [{ translateX: 6 - d }, { translateY: 6 - d }] },
           hardShadow(d),
           disabled && styles.disabled,
         ];
       }}
     >
-      {loading ? <ActivityIndicator color={paper.ink} /> : <Icon name={icon} size={compact ? 24 : primary ? 34 : 28} color={paper.ink} />}
+      {loading ? <ActivityIndicator color={paper.ink} /> : <Icon name={icon} size={compact ? 24 : short ? (primary ? 28 : 22) : primary ? 34 : 28} color={paper.ink} />}
       {compact ? null : (
         <Text style={[styles.tabText, primary && styles.tabTextPrimary]} numberOfLines={2}>
           {label}

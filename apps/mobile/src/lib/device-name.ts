@@ -17,9 +17,22 @@ export function deviceName(): string {
   return cap(Platform.OS);
 }
 
+const TV_UA = /SMART-TV|SmartTV|Tizen|Web0S|webOS|HbbTV|BRAVIA|AFT\w|Android TV|GoogleTV|CrKey/i;
+
+/**
+ * Is this screen a TV? Then it is only watched: no buttons on it, the phone (Camera) is the remote control.
+ * On the web, `?tv=1` in the address forces it (to try the TV layout on a computer).
+ */
+export function isTV(): boolean {
+  if (Platform.OS !== 'web') return !!Platform.isTV;
+  const g = globalThis as any;
+  if (/[?&]tv=1\b/.test(String(g.location?.search ?? ''))) return true;
+  return TV_UA.test(String(g.navigator?.userAgent ?? ''));
+}
+
 function webName(ua: string): string {
   const touchMac = /Macintosh/.test(ua) && (globalThis as any).navigator?.maxTouchPoints > 1; // an iPad asks for the desktop site
-  const os = /SMART-TV|SmartTV|Tizen|Web0S|webOS|HbbTV|BRAVIA|AFT\w|Android TV|GoogleTV|CrKey/i.test(ua)
+  const os = TV_UA.test(ua)
     ? 'TV'
     : /iPad/.test(ua) || touchMac
       ? 'iPad'

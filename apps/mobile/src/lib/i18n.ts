@@ -62,6 +62,19 @@ export const isRtl = () => appLang() === 'ar';
 type Dict = Record<string, string>;
 
 const EN: Dict = {
+  'Politique de confidentialité': 'Privacy policy',
+  'Conditions d’utilisation': 'Terms of use',
+  'Retour': 'Back',
+  'En continuant, tu acceptes :': 'By continuing, you accept:',
+  'Je suis le parent ou le tuteur légal de l’enfant et j’accepte les conditions d’utilisation et la politique de confidentialité.': 'I am the child’s parent or legal guardian and I accept the terms of use and the privacy policy.',
+  'Supprimer mon compte': 'Delete my account',
+  'Toutes les données de la famille seront supprimées : enfants, photos, bilans, appareils. C’est définitif.': 'All the family’s data will be deleted: children, photos, summaries, devices. This cannot be undone.',
+  'Supprimer': 'Delete',
+  'Annuler': 'Cancel',
+  '{name} est une IA : elle peut mal lire une photo ou se tromper. Vérifie ses corrections : c’est une aide aux devoirs, elle ne remplace ni l’enseignant ni toi.':
+    '{name} is an AI: she can misread a photo or make mistakes. Check her corrections: she helps with homework, she does not replace the teacher or you.',
+  '{name} peut se tromper. Tu penses avoir raison ? Dis-le-lui !': '{name} can be wrong. Think you are right? Tell her!',
+  'Bilan préparé par une IA : il peut contenir des erreurs.': 'Summary written by an AI: it may contain mistakes.',
   // language setting
   'Langue du téléphone': 'Phone language',
   "Langue de l'app": 'App language',
@@ -96,6 +109,7 @@ const EN: Dict = {
   'On t’envoie un lien pour choisir un nouveau mot de passe.': 'We will send you a link to choose a new password.',
   'Continuer avec Google': 'Continue with Google',
   ou: 'or',
+  Photo: 'Photo',
   'E-mail': 'E-mail',
   'Mot de passe': 'Password',
   'Mot de passe oublié ?': 'Forgot password?',
@@ -241,6 +255,8 @@ const EN: Dict = {
   'Exercice {ex} →': 'Exercise {ex} →',
   'Choisir un autre exercice': 'Choose another exercise',
   'Autre exercice': 'Another exercise',
+  'Ouvrir l’espace parent': 'Open the parent space',
+  'Exercices': 'Exercises',
   'Tourner la page': 'Turn the page',
   'Voir la photo': 'See the photo',
   'Fermer l’exercice similaire': 'Close the similar exercise',
@@ -271,6 +287,19 @@ const EN: Dict = {
 };
 
 const AR: Dict = {
+  'Politique de confidentialité': 'سياسة الخصوصية',
+  'Conditions d’utilisation': 'شروط الاستخدام',
+  'Retour': 'رجوع',
+  'En continuant, tu acceptes :': 'بالمتابعة، أنت توافق على:',
+  'Je suis le parent ou le tuteur légal de l’enfant et j’accepte les conditions d’utilisation et la politique de confidentialité.': 'أنا وليّ أمر الطفل أو الوصيّ القانوني عليه، وأوافق على شروط الاستخدام وسياسة الخصوصية.',
+  'Supprimer mon compte': 'حذف حسابي',
+  'Toutes les données de la famille seront supprimées : enfants, photos, bilans, appareils. C’est définitif.': 'ستُحذف كل بيانات العائلة: الأطفال والصور والملخّصات والأجهزة. لا يمكن التراجع عن ذلك.',
+  'Supprimer': 'حذف',
+  'Annuler': 'إلغاء',
+  '{name} est une IA : elle peut mal lire une photo ou se tromper. Vérifie ses corrections : c’est une aide aux devoirs, elle ne remplace ni l’enseignant ni toi.':
+    '{name} ذكاء اصطناعي: قد تخطئ في قراءة الصورة أو في التصحيح. راجِع تصحيحاتها: هي مساعدة في الواجبات، ولا تعوّض المعلّم ولا تعوّضك.',
+  '{name} peut se tromper. Tu penses avoir raison ? Dis-le-lui !': 'قد تخطئ {name}. تظنّ أنّ جوابك صحيح؟ قل لها!',
+  'Bilan préparé par une IA : il peut contenir des erreurs.': 'ملخّص أعدّه ذكاء اصطناعي: قد يحتوي على أخطاء.',
   'Langue du téléphone': 'لغة الهاتف',
   "Langue de l'app": 'لغة التطبيق',
   'Boutons et écrans de l’app, sur tous les appareils de la famille. Silia garde sa propre langue.': 'أزرار وشاشات التطبيق، على كل أجهزة العائلة. سيليا تحتفظ بلغتها.',
@@ -301,6 +330,7 @@ const AR: Dict = {
   'On t’envoie un lien pour choisir un nouveau mot de passe.': 'سنرسل لك رابطًا لاختيار كلمة مرور جديدة.',
   'Continuer avec Google': 'المتابعة باستخدام Google',
   ou: 'أو',
+  Photo: 'الصورة',
   'E-mail': 'البريد الإلكتروني',
   'Mot de passe': 'كلمة المرور',
   'Mot de passe oublié ?': 'نسيت كلمة المرور؟',
@@ -442,6 +472,8 @@ const AR: Dict = {
   'Exercice {ex} →': 'التمرين {ex} ←',
   'Choisir un autre exercice': 'اختيار تمرين آخر',
   'Autre exercice': 'تمرين آخر',
+  'Ouvrir l’espace parent': 'فتح فضاء الوالدين',
+  'Exercices': 'التمارين',
   'Tourner la page': 'تدوير الصفحة',
   'Voir la photo': 'عرض الصورة',
   'Fermer l’exercice similaire': 'إغلاق التمرين المشابه',

@@ -1,7 +1,7 @@
 import type { DeviceRole, SessionSummary } from '@hc/shared';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/focus-pressable';
@@ -205,6 +205,20 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
   const hasCamera = devices.some((d) => d.role === 'camera');
   const hour = new Date().getHours();
 
+  /** Deletes the parent's account and the family's data (asked twice: it cannot be undone). */
+  async function deleteAccount() {
+    const warning = t('Toutes les données de la famille seront supprimées : enfants, photos, bilans, appareils. C’est définitif.');
+    const ok = await confirmDanger(t('Supprimer mon compte'), warning, t('Supprimer'));
+    if (!ok) return;
+    setError('');
+    const { error: e } = await supabase.functions.invoke('delete-account', { body: { confirm: 'DELETE' } });
+    if (e) {
+      setError(await functionError(e));
+      return;
+    }
+    await supabase.auth.signOut();
+  }
+
   return (
     <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
       <StatusBar style="dark" />
@@ -263,6 +277,12 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
               <Text style={[styles.chevron, { color: paper.ink }]}>➜</Text>
             </Chunky>
 
+            {/* Silia is an AI: a help, not the one in charge of the child's learning */}
+            <View style={styles.aiCard}>
+              <Icon name="info" size={20} color={paper.ink} />
+              <Text style={styles.aiText}>{t('{name} est une IA : elle peut mal lire une photo ou se tromper. Vérifie ses corrections : c’est une aide aux devoirs, elle ne remplace ni l’enseignant ni toi.', { name: TUTOR_NAME })}</Text>
+            </View>
+
             {report ? (
               <>
                 <HandCaption>{t('DERNIÈRE SÉANCE')}</HandCaption>
@@ -279,6 +299,7 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
                   <Text style={styles.report} numberOfLines={reportOpen ? undefined : 2}>
                     {report.summary.parent_text}
                   </Text>
+                  {reportOpen ? <Text style={styles.sub}>{t('Bilan préparé par une IA : il peut contenir des erreurs.')}</Text> : null}
                   <Pressable accessibilityRole="button" onPress={() => setReportOpen((v) => !v)}>
                     <Text style={styles.link}>{t(reportOpen ? 'Réduire' : 'Voir le bilan ›')}</Text>
                   </Pressable>
@@ -375,6 +396,17 @@ export function ParentHome({ household, onSignOut, onChanged }: { household: Hou
             <View style={styles.group}>
               {email ? <Row first icon="✉️" title={email} /> : null}
               <Row first={!email} title={t('Se déconnecter')} danger onPress={onSignOut} />
+            </View>
+            <View style={styles.group}>
+              <Row first icon="📄" title={t('Conditions d’utilisation')} onPress={() => router.push('/terms')} />
+              <Row icon="🔒" title={t('Politique de confidentialité')} onPress={() => router.push('/privacy')} />
+              <Row
+                icon="🗑️"
+                title={t('Supprimer mon compte')}
+                sub={t('Toutes les données de la famille seront supprimées : enfants, photos, bilans, appareils. C’est définitif.')}
+                danger
+                onPress={deleteAccount}
+              />
             </View>
             <ErrorText>{error}</ErrorText>
           </>
@@ -622,6 +654,19 @@ const styles = StyleSheet.create({
   stat: { flex: 1, borderWidth: 2, borderColor: paper.ink, borderRadius: 3, borderBottomRightRadius: 12, paddingVertical: 10, alignItems: 'center', ...hardShadow(3) },
   statValue: { ...font.bold, fontSize: 28 },
   statLabel: { ...font.semi, color: paper.ink, fontSize: 13 },
+  aiCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: paper.stickyBlue,
+    borderWidth: 2,
+    borderColor: paper.ink,
+    borderRadius: 3,
+    borderBottomRightRadius: 14,
+    padding: 12,
+    ...hardShadow(3),
+  },
+  aiText: { ...font.medium, color: paper.ink, fontSize: 14, lineHeight: 20, flex: 1 },
   report: { ...font.regular, color: paper.ink, fontSize: 16, lineHeight: 23 },
   link: { ...font.semi, color: paper.blueInk, fontSize: 15, textDecorationLine: 'underline' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: space.md, minHeight: 56 },
@@ -664,3 +709,14 @@ const styles = StyleSheet.create({
     boxShadow: 'inset 0px 3px 0px rgba(45,49,66,0.12)',
   },
 });
+
+/** A yes/no question before something that cannot be undone (web: the browser's dialog; phone: a system alert). */
+function confirmDanger(title: string, message: string, yes: string): Promise<boolean> {
+  if (Platform.OS === 'web') return Promise.resolve(!!(globalThis as any).confirm?.(`${title}\n\n${message}`));
+  return new Promise((resolve) =>
+    Alert.alert(title, message, [
+      { text: t('Annuler'), style: 'cancel', onPress: () => resolve(false) },
+      { text: yes, style: 'destructive', onPress: () => resolve(true) },
+    ]),
+  );
+}
