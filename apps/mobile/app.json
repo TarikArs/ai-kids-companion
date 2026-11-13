@@ -71,7 +71,8 @@
           }
         }
       ],
-      "expo-screen-orientation"
+      "expo-screen-orientation",
+      "./plugins/with-android-tv"
     ],
     "experiments": {
       "typedRoutes": true,

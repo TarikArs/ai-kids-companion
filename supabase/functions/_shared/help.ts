@@ -206,8 +206,11 @@ function taskFor(c: HelpCtx, action: HelpAction, level: number): string {
 Say in your own words what has to be done, give the method step by step at the level of ${c.grade}${
         c.advanced ? ' (the school word only if it is in the exercise, explained with easy words)' : ' (very concrete: fingers, objects, start from the bigger number…)'
       }, work ONE similar example with DIFFERENT numbers or words, as concrete objects when it fits (e.g. « 7 chatons, 3 partent jouer : il en reste 4 »), worked fully, then invite her to try.
+If the page prints a worked example (« Regarde bien l'exemple », a first row already filled in), explain with THAT example.
+Your own example must NEVER use a word, number or item of the exercise she has to do (not even as « par exemple »).
 ${level >= 2 ? 'She already heard an explanation and is still stuck: explain it differently, simpler and more concrete, one step per sentence.' : ''}
-${c.advanced ? '5 to 9' : '4 to 7'} sentences, ${len}. NEVER give the answer of an item on the page.`;
+${c.advanced ? '5 to 9' : '4 to 7'} sentences, ${len}. NEVER give the answer of an item on the page.
+Speak as yourself, in the first person (« je »), to her (« tu »): never « Silia t'invite… ».`;
     case 'solve':
       return `TASK: solve the ACTIVE EXERCISE TOGETHER, like a teacher sitting next to her. She must do the work herself.
 Look at the recent conversation: if you already started, continue from where you are. Otherwise start with the first item not done yet.
@@ -287,6 +290,11 @@ async function runSimilar(c: HelpCtx, e: PageExercise): Promise<{ text: string; 
 ${exerciseBlock(e, c.page!, 'none')}
 TASK: create ONE new practice exercise of the SAME kind, SAME layout and SAME difficulty as on her page, with different
 numbers, letters or words (3 items; 2 for word problems). Never copy an item of her page.
+Keep the exact SHAPE of her items: the blank (?) at the same place, the same kind of missing part, and NEVER write the
+answer or part of it in q. Example: her page shows the family « gonfler / dégonfler / regonfler » and asks the missing
+letters of « ?plier » (answer "re") -> items like "?monter" (a "re"), "?faire" (a "re"), "?coudre" (a "dé"), with the
+instruction showing a worked family first if her page does. A matching exercise (« Relie… à la maison du son ») -> 3 new
+words to sort into the same sound houses, q = "lune : f ou l ?". A copy exercise -> a new short model to copy.
 Return JSON only: {"lang":"fr|fus|ar|en","kind":"copy|fill|other","title":"...","instr":"...","items":[{"q":"...","a":"...","m":"","slots":3}],"intro":"..."}
 kind: copy = handwriting practice (a model letter or word, then empty slots to write it in, like "Recopier A" on her page);
 fill = items with a blank to complete (a calculation "45 - 18 = ?", a word with a gap); other = anything else.
@@ -302,7 +310,7 @@ ${languageRule(c)}`;
   const items = (Array.isArray(out.items) ? out.items : [])
     .slice(0, 4)
     .map((it: Record<string, unknown>) => {
-      const m = typeof it.m === 'string' && it.m.trim() ? it.m.trim().slice(0, 12) : undefined;
+      const m = typeof it.m === 'string' && it.m.trim() ? it.m.trim().slice(0, 80) : undefined;
       const q = String(it.q ?? (m ? `Recopier ${m}` : '')).trim();
       const computed = expectedAnswer(q); // arithmetic: the code's answer wins
       const slots = Math.min(6, Math.max(1, Math.round(Number(it.slots) || 3)));
@@ -329,7 +337,7 @@ async function runVerdict(c: HelpCtx, e0: PageExercise): Promise<Spoken> {
   const lang = languageFor(c);
   const e = await zoomed(c, e0);
   const text = c.snap ? () => pageText(c.snap!, (p) => p) : undefined;
-  const lines = await confirm(await remember(c, await checkOpen(e, judge(e), lang, c.grade, text)), photoOf(c), c.grade, c.log);
+  const lines = await confirm(await remember(c, await checkOpen(e, judge(e), lang, c.grade, text, photoOf(c))), photoOf(c), c.grade, c.log);
   const next = c.page!.exercises.filter((x) => x.n > e.n).sort((a, b) => a.n - b.n)[0];
   return await speakLines(c, lines, { index: e.n, title: e.title, instr: e.instr, label: e.label, frame: frame(e), next, guideFor: e });
 }
@@ -557,6 +565,7 @@ Return JSON only: {"act":"explain|solve|correct|select|choose|question|clarify",
 act: explain = explain the instruction or the ideas; solve = solve it together step by step; correct = check her answers;
 select = she only names an exercise; choose = she wants another exercise or asks which ones there are;
 question = anything else (a question, a step result, an answer to Silia, chat): it continues the active exercise;
+when she GIVES answers (words, letters, numbers: « carafe f, bol l », « re », « 354 »), it is question, never correct;
 clarify = her request is really ambiguous (which exercise? what help?): put ONE short question in clarify, in ${SPEAKING_STYLE[lang]}.
 ex: the exercise number she said (printed number or position as she said it), "the next one" = active + 1, null for "it"/"this one"/none.
 Never invent a number she did not say.`;
@@ -600,7 +609,15 @@ ${convo ? `Recent conversation:\n${convo}` : ''}
 She just said: "${transcript}"
 Answer in ${SPEAKING_STYLE[lang]}, 1 to 4 short sentences, warm, read aloud (no lists, no emojis).
 If she gives a step or a result: say if it is right (praise) or not quite (kind hint), then give the next small step.
-If her answer to an item cannot be seen on the photo, say so instead of guessing. Never give the final answer of an item.
+She may answer aloud or by typing instead of writing (« carafe f, bol l »): judge THOSE answers directly, item by item,
+even if nothing is written on the photo yet; praise the right ones and give a kind hint for a wrong one, then tell her she
+can now write them on her page. Only when she asks you to look at her page and her answer is not visible: say so.
+Never give the final answer of an item, not even partly: never write the word with its missing letters filled in, never
+spell the missing part, never say « re…plier ».
+Before judging or giving a hint, make sure it is TRUE. Sound houses (« maison des sons »): the sound may be at the start,
+in the middle or at the END of the word (« vaisselle » and « bol » have [l], « carafe » and « four » have [f]): say each
+word slowly in your head before you judge. A hint asks her to listen (« Dis "bol" doucement : quel son entends-tu à la
+fin ? »), it does not give the house.
 If Silia just asked her to retell the text in her own words: compare with the page text, praise what she understood,
 and gently add the ONE key point she missed (if any).
 If what she said is unclear, kindly ask her to repeat. Reply with the answer only.`;

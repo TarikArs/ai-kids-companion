@@ -1,6 +1,6 @@
 import type { Annotation, ExerciseChoice, ExerciseFocus, HelpAction, SessionEvents, TurnRef } from '@hc/shared';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { useKeepAwake } from 'expo-keep-awake';
+import { useStayAwake } from '@/lib/keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -84,7 +84,7 @@ function lineText(l: ResultLine): string {
 }
 
 export default function Board() {
-  useKeepAwake();
+  useStayAwake();
   /**
    * « Un seul téléphone »: the Camera phone opens this screen after a photo (?solo=1&photo=<snapshot id>), sideways,
    * already started, then « Retour à la caméra ». No pairing, no TV.
@@ -901,7 +901,7 @@ export default function Board() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
-      <Desk style={[styles.deskPad, compact && styles.deskPadCompact]}>
+      <Desk style={[styles.deskPad, compact && styles.deskPadCompact, tv && Platform.OS !== 'web' && styles.deskPadTv]}>
         {/* On the desk, above the binder: Silia's name taped on, the state on a sticky note, a few desk tools. */}
         <View style={[styles.topRow, compact && { minHeight: 36, gap: 8 }]}>
           {/* the state, as a dot: green = homework in progress, yellow = looking / paused, grey = waiting for the camera */}
@@ -1239,6 +1239,8 @@ const MARK_COLOR: Record<ResultLine['status'], string> = {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#EFE6DD' },
   deskPad: { padding: 18, paddingTop: 10, gap: 12 },
+  // Android TV: keep everything inside the title-safe area (overscan), about 5% of the screen.
+  deskPadTv: { paddingHorizontal: 48, paddingTop: 27, paddingBottom: 27 },
   deskPadCompact: { padding: 8, paddingTop: 4, gap: 6 },
   // desk top
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, zIndex: 2 },

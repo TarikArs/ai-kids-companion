@@ -32,6 +32,8 @@ export interface PageItem {
   hn?: string;
   /** Box of her answer on the photo. */
   r?: Region;
+  /** The zoom saw nothing where the first reading saw an answer: kept until a close-up check decides. */
+  d?: boolean;
 }
 
 export interface PageExercise {
@@ -84,21 +86,51 @@ export const clampRegion = (r: unknown): Region | undefined =>
 // Compact keys keep the model's output short: output tokens are the main cost in time.
 const readPrompt = (grade: string, hintLang: string) => `Photo of homework by a child in ${grade}. READ what the child wrote; do not correct.
 Return JSON only, compact:
-{"rot":0,"v":true,"h":false,"lang":"fr","e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","tx":"","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","c":0.95,"r":[x,y,w,h]}]}
+{"rot":0,"v":true,"h":false,"lang":"fr","e":[{"n":1,"lb":"1","ti":"Soustractions posées","in":"Pose et calcule.","tx":"","r":[x,y,w,h]}],"i":[{"e":1,"k":"6 - 2 = ?","t":"fill_in","a":"4","w":"c","c":0.95,"r":[x,y,w,h]}]}
 rot: how many degrees the photo must be turned CLOCKWISE so the printed text reads upright (0, 90, 180 or 270).
 v: a homework page is visible (true even if a little is cut off or a finger holds the edge). h: a hand or object
 hides MOST of the page so its answers cannot be read; a finger or thumb holding the page edge is NOT h. lang: fr|ar|en, the page's language.
-e: the separate exercises in reading order, EVEN EMPTY ONES: n = position 1, 2, 3…; lb = the number printed on the page
+e: the separate exercises in reading order, EVEN EMPTY ONES and small boxes at the top (« Calcul rapide »,
+« Calcul mental », a warm-up band): each is an exercise of its own: n = position 1, 2, 3…; lb = the number printed on the page
 ("" if none); ti = short title in the page's language; in = the printed instruction (max 20 words); tx = the printed
 statement and data of the exercise, VERBATIM (word problem, riddle, numbers given, short text; max 80 words; "" if the
-items already say everything); r = the exercise's box.
+items already say everything). For a TABLE, tx = its rows as printed, cells separated by « | », one row per line, ? for a
+blank (« gonfler | dégonfler | regonfler / plier | déplier | ?plier »): the pattern of the rows is needed to find the
+answers. A matching exercise (« Relie… ») is NOT a table: tx = the words and the boxes as two separate lists
+(« Mots : vaisselle, four, carafe, bol. Maisons : f, l. »), never side by side. r = the exercise's box.
 Many exercises have NO printed instruction: infer the task from the layout and write it in the page's language, never
 "no instruction". A model letter, digit or word at the start of a line followed by dots, slots or empty space = handwriting
 practice (t=copy): "Écris la lettre A dans chaque case". One item per line: k = "Recopier A", m = the model ("A"),
 a = EVERYTHING she wrote on that line after the model, separated by spaces, exactly as written even if it is another
 letter (e.g. "A a e"); a = null only if all slots are empty. Dots or lines are empty slots, not answers. Erased pencil (grey ghost marks, smudges left by a rubber) = erased = empty: a = null.
-i: every item where the child must write, empty ones too (a = null); e = the n of its exercise. k: the item as printed with ? for the blank.
-t: fill_in|number_line|word_problem|matching|copy|counting|other.
+PRINTED or HANDWRITTEN — the most important rule. Workbooks PRINT many words in school cursive (joined-up) script:
+model sentences to copy, words after a blank (« ____plier »), labels. Printed cursive is perfectly regular, the same ink
+and colour as the page, aligned with the layout. Her handwriting is pencil or pen: irregular, grey or coloured, often
+slightly off the line. A printed word is NEVER her answer, even in cursive. If you are not sure it is hers, it is printed.
+Worked example rows (« Regarde bien l'exemple », the first row of a table already filled in print, often shaded) are the
+model: no items for them. Example answers PRINTED on the page (often blue, in a handwriting-like font, on the first line
+or the first box: « Nine. », « Matt », « Let's run. », « C 1 ») are part of the example: no item, or a = null.
+Choosing a label by colouring it (« colorie l'étiquette qui convient »): one item per sentence, k = "L'éléphant est
+maigre | gros", a = the label she coloured, null if none.
+i: every item where the child must write, empty ones too (a = null); e = the n of its exercise. k: the item as printed with ? for the blank:
+ONLY printed text goes in k, never letters that are not printed. « Écris les lettres qui manquent » with a blank line before
+the printed word « plier » -> k = "?plier", a = only what she wrote ON the blank (null if the blank line is empty).
+Matching (« Relie », words to boxes): one item per word, k = "Relier « vaisselle »" , a = the box her drawn line reaches
+(e.g. "l"), null when no line was drawn. Printed dots are not lines.
+Circling, ticking or colouring IN A ROW (« Sur chaque ligne, entoure les mots identiques au modèle »): one item per row,
+t=other, k = "Ligne « un » : un | ui | un | une" (the row's model, then its printed choices), a = the choices she marked,
+with their place (« 1 un, 3 un »), null if she marked nothing in that row. Pictures to circle (« Entoure les images… »):
+one item per picture, k = its printed word, a = "entouré" or null. Colouring a word grid (« Colorie les cases… »): one
+item per word of the list, k = "Colorier ÎLE", a = the letters of the cells she coloured for it, with the colour
+(« bleu : R, I »), null if none.
+Dictation (« Dictée »): there is NO model on the page; t=dictation, one item per line, k = "Dictée ligne 1", a = what she
+wrote, null if the line is empty.
+Reading aloud only (« Lis les syllabes / les mots / les phrases »): nothing to write, no items.
+Copying a sentence (« Écriture », a printed model then empty lines): t=copy, k = "Recopier « Il ira à l'île. »",
+m = the model sentence, a = ONLY what she wrote on the lines under or next to the model, null if they are empty.
+w: who wrote a: "c" = the child (pencil or pen strokes), "p" = it is printed on the page. Never guess letters that should
+be there: no pencil strokes on a blank = a null.
+t: fill_in|number_line|word_problem|matching|copy|counting|dictation|other.
 a: COPY the child's handwriting digit by digit, exactly as written, even if it is wrong or unfinished. Never write what the
 answer should be, never correct it, never complete it. Faint pencil: give your best reading and a LOWER confidence c.
 Only when nothing can be made out (empty, cut off, fully illegible): a = null. A whole calculation she wrote: a = all of it.
@@ -116,7 +148,30 @@ interface RawItem {
   c?: number;
   r?: number[];
   hn?: string;
+  w?: string;
 }
+
+/**
+ * The reading sometimes gives printed text as her answer (workbooks print words in cursive): the printed word after a
+ * blank (« ?plier » -> « plier »), a copy model (« Il ira à l'île. »), or anything it marks as printed (w = "p").
+ * Returns null (nothing written by her) in those cases.
+ */
+const flatText = (x: string) => x.normalize('NFC').toLowerCase().replace(/[’']/g, "'").replace(/[\s…_.]+/g, '');
+export function herAnswer(q: string, a: string | null, m?: string, w?: string): string | null {
+  if (!a || !a.trim()) return null;
+  if (w === 'p') return null;
+  const fa = flatText(a);
+  // Only an item with a blank (?) can have its printed part read as her answer.
+  if (q.includes('?') && (fa === flatText(q) || fa === flatText(q.replace(/\?/g, '')))) return null;
+  if (q.includes('?') && q.split('?').some((part) => flatText(part).length >= 3 && flatText(part) === fa)) return null;
+  if (m && /\s/.test(m.trim()) && fa === flatText(m)) return null;
+  return a;
+}
+
+export const statusOf = (items: PageItem[]): PageExercise['s'] => {
+  const filled = items.filter((i) => i.a).length;
+  return filled === 0 ? 'empty' : filled === items.length ? 'done' : 'partial';
+};
 
 export const DEFAULT_HINT_LANG =
   "in the page's language (French page: French; Arabic page: simple Modern Standard Arabic, speaking to a girl; English page: English), with very, very easy words a little girl knows, no difficult school words";
@@ -156,11 +211,11 @@ export async function readPage(imageB64: string, grade: string, hintLang = DEFAU
         .slice(0, 30)
         .map((it) => {
           const r = clampRegion(it.r);
-          const m = typeof it.m === 'string' && it.m.trim() ? it.m.trim().slice(0, 12) : undefined;
+          const m = typeof it.m === 'string' && it.m.trim() ? it.m.trim().slice(0, 80) : undefined;
           const hn = typeof it.hn === 'string' && it.hn.trim() ? it.hn.trim().slice(0, 200) : undefined;
           return {
             q: String(it.k ?? ''),
-            a: it.a === null || it.a === undefined || String(it.a).trim() === '' ? null : String(it.a),
+            a: herAnswer(String(it.k ?? ''), it.a === null || it.a === undefined ? null : String(it.a), m, it.w),
             c: Number(it.c ?? 0),
             t: String(it.t ?? 'other'),
             ...(m ? { m } : {}),
@@ -168,7 +223,6 @@ export async function readPage(imageB64: string, grade: string, hintLang = DEFAU
             ...(r ? { r } : {}),
           };
         });
-      const filled = mine.filter((i) => i.a).length;
       const r = clampRegion(e.r) ?? boxAround(mine);
       return {
         n,
@@ -176,7 +230,7 @@ export async function readPage(imageB64: string, grade: string, hintLang = DEFAU
         title: String(e.ti ?? '').slice(0, 80) || String(n),
         instr: String(e.in ?? '').slice(0, 200),
         ...(String(e.tx ?? '').trim() ? { tx: String(e.tx).trim().slice(0, 600) } : {}),
-        s: filled === 0 ? 'empty' : filled === mine.length ? 'done' : 'partial',
+        s: statusOf(mine),
         ...(r ? { r } : {}),
         items: mine,
       } satisfies PageExercise;

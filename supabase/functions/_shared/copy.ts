@@ -24,6 +24,14 @@ export function copyModel(q: string, model?: string | null): string | null {
 export function checkCopy(model: string, written: string | null): { ok: boolean; wrong: string[] } | null {
   if (!written) return null;
   const target = fold(model);
+  // A model sentence (« Il ira à l'île. »): her copy must contain it; the wrong pieces are her words not in the model.
+  if (/\s/.test(model.trim())) {
+    const words = new Set(model.split(/\s+/).map(fold).filter(Boolean));
+    const mine = written.split(/\s+/).filter((w) => fold(w));
+    if (!mine.length || !target) return null;
+    const wrong = mine.filter((w) => !words.has(fold(w)));
+    return { ok: fold(written).includes(target) && wrong.length === 0, wrong };
+  }
   // "?" = a letter too badly formed to read: counts as one to redo.
   const pieces = written.split(/[\s,;]+/).filter((p) => p.trim());
   if (!pieces.length || !target) return null;

@@ -16,6 +16,7 @@ import { useAppStore } from '@/lib/store';
 import { space } from '@/lib/theme';
 import { TUTOR_NAME } from '@/lib/tutor';
 import { useSession } from '@/lib/use-session';
+import { isTV } from '@/lib/device-name';
 
 /** Each role is a sticky note of its own colour, slightly turned, as if stuck on the page by hand. */
 const ROLES: {
@@ -58,6 +59,8 @@ export default function Home() {
   const { width } = useWindowDimensions();
   /** Big screen (computer, tablet sideways): the parent signs in right here, on the left; Tableau and Caméra on the right. */
   const wide = width >= 900;
+  /** A TV has no camera to hold over the exercise book: it can be the Board (or the parent space). */
+  const tv = isTV();
   const parentEmail = session && !session.user.is_anonymous ? (session.user.email ?? '') : null;
 
   if (role === 'parent') return <Redirect href="/parent" />;
@@ -126,7 +129,7 @@ export default function Home() {
           {/* right: the two devices of the homework, centred on the sign-in box */}
           <View style={styles.column}>
             <View style={[styles.columnCenter, { flex: 1, gap: space.lg }]}>
-              {(wide ? ROLES.filter((r) => r.role !== 'parent') : ROLES).map((r, i) => (
+              {ROLES.filter((r) => !(wide && r.role === 'parent') && !(tv && r.role === 'camera')).map((r, i) => (
                 <Pressable
                   key={r.role}
                   preferFocus={i === 0}
@@ -157,7 +160,7 @@ export default function Home() {
         </View>
       ) : (
         <View style={{ gap: space.lg }}>
-          {ROLES.map((r, i) => (
+          {ROLES.filter((r) => !(tv && r.role === 'camera')).map((r, i) => (
             <Pressable
               key={r.role}
               preferFocus={i === 0}

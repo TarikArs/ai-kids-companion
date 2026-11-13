@@ -11,7 +11,8 @@ import { expectedAnswer, ownCalculationSlip, sameAnswer } from './arithmetic.ts'
 import { checkCopy, copyModel, verifyCopyLines } from './copy.ts';
 import type { Practice } from './intent.ts';
 import { SPEAKING_STYLE, type Lang } from './language.ts';
-import { readPage, type PageExercise, type PageItem, type Region, exerciseBrief, needsPageText } from './page.ts';
+import { readPage, READ_MODEL, type PageExercise, type PageItem, type Region, exerciseBrief, needsPageText } from './page.ts';
+import { cropB64 } from './zoom.ts';
 
 const MODEL = Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-6-luna';
 /** Deeper reading that confirms a "wrong" (empty = no confirmation, the fast reading is trusted). */
@@ -36,6 +37,8 @@ export interface Line {
   hn?: string;
   /** Wrong copy: what she wrote that is not the model (for the hint). */
   why?: string;
+  /** A line of a dictation: not checkable (the dictated sentence is not on the page). */
+  dictation?: boolean;
   /** Written since the last photo of this exercise (memory.ts): spoken about first. */
   isNew?: boolean;
 }
@@ -51,7 +54,13 @@ export function judge(e: PageExercise): Line[] {
     const base = { q: it.q, a: it.a, c: it.c, ...(it.r ? { r: it.r } : {}), ...(it.hn ? { hn: it.hn } : {}) };
     if (!it.a || !it.a.trim()) return { ...base, status: 'empty' };
     // The reading copied the printed item itself (« mang.r » for « mang.r »): nothing written yet.
-    if (same(it.a, it.q) || same(it.a, it.q.replace(/\?/g, ''))) return { ...base, a: null, status: 'empty' };
+    if (/[?…_]/.test(it.q) && (same(it.a, it.q) || same(it.a, it.q.replace(/\?/g, '')))) return { ...base, a: null, status: 'empty' };
+    // A dictation: the dictated text is not on the page, so it is never judged right or wrong from the photo.
+    if (it.t === 'dictation') return { ...base, status: 'open', dictation: true };
+    // « ?plier » read as « plier »: the printed part of the item, not her writing.
+    if (it.q.includes('?') && it.q.split('?').some((part) => flat(part).length >= 3 && same(it.a!, part))) return { ...base, a: null, status: 'empty' };
+    // A copy line « read » as exactly its printed model with low confidence is the model itself.
+    if (it.m && it.m.includes(' ') && same(it.a, it.m) && it.c < 0.9) return { ...base, a: null, status: 'empty' };
     const model = it.t === 'copy' || it.m ? copyModel(it.q, it.m) : null;
     if (model) {
       const copied = checkCopy(model, it.a);
@@ -82,7 +91,9 @@ const centre = (r?: Region) => (r ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : nul
  * confirmed; another one = « je lis… c'est bien ça ? »), and a copy line is looked at slot by slot before any "Bravo".
  */
 export async function confirm(lines: Line[], photo: () => Promise<string>, grade: string, log: (s: string, d?: unknown) => void): Promise<Line[]> {
-  const suspects = lines.filter((l) => l.status === 'wrong' && !l.copy);
+  // Marks (circled, ticked, coloured) are seen, not read digit by digit: no second reading for them.
+  const MARKED = /^(entour|coch|colori|soulign|barr|circled|ticked|x$|✓)/i;
+  const suspects = lines.filter((l) => l.status === 'wrong' && !l.copy && !MARKED.test(String(l.a ?? '').trim()));
   if (VERIFY_EFFORT && VERIFY_EFFORT !== READ_EFFORT && suspects.length) {
     const again = await readPage(await photo(), grade, undefined, VERIFY_EFFORT);
     const items = again.exercises.flatMap((e) => e.items);
@@ -94,8 +105,9 @@ export async function confirm(lines: Line[], photo: () => Promise<string>, grade
           const d = centre(i.r);
           return !!c && !!d && Math.abs(c.x - d.x) < 0.04 && Math.abs(c.y - d.y) < 0.04;
         });
-      if (twin && compact(twin.a) === compact(l.a)) {
-        if (twin.hn) l.hn = twin.hn;
+      if (!twin || compact(twin.a) === compact(l.a)) {
+        // Same answer read again, or the item not found in the second reading (other wording): the verdict stands.
+        if (twin?.hn) l.hn = twin.hn;
       } else {
         log('wrong not confirmed by the deeper reading', { q: l.q, fast: l.a, deep: twin?.a ?? null });
         l.status = 'unsure';
@@ -137,23 +149,86 @@ export async function checkOpen(
   grade: string,
   /** Printed text of the page (the story), read only when an item needs it: Vrai/Faux, a word's meaning in the text… */
   pageText?: () => Promise<string>,
+  /** The photo: items that depend on a picture (a clock, objects to count, a drawing) are checked by looking at it. */
+  photo?: () => Promise<string>,
 ): Promise<Line[]> {
-  for (const l of lines) if (l.status === 'open' && l.a && l.c < THRESHOLD) l.status = 'unsure';
-  const todo = lines.filter((l) => l.status === 'open' && l.a);
+  // A mark (circled, ticked, coloured) is easier to see than handwriting: « Je lis "entouré" » only when really unsure.
+  const MARK = /^(entour|coch|colori|soulign|barr|x$|✓|\d+\s)/i;
+  for (const l of lines) if (l.status === 'open' && l.a && !l.dictation && l.c < (MARK.test(l.a.trim()) ? 0.55 : THRESHOLD)) l.status = 'unsure';
+  const todo = lines.filter((l) => l.status === 'open' && l.a && !l.dictation);
   if (!todo.length) return lines;
   // Questions about a text (Vrai/Faux, « dans le texte »…): start reading the page text now, in parallel.
   const aboutText = needsPageText(e, ABOUT_TEXT);
   let textPromise = aboutText && pageText ? pageText().catch(() => '') : null;
+  // Answers that are in a picture (how many, what time, which drawing): judged by looking, never by guessing from text.
+  const PICTURE = /how many|count|what time|combien|compte|quelle heure|il est .*heure|horloge|aiguille|dessin|image|picture|clock|longueur|plus long|plus court|plus grand|plus petit|taille|bande|trait|règle|observe|regarde|tall|short|long|look|كم|الساعة/i;
+  const byPicture = (l: Line) => PICTURE.test(`${l.q} ${e.instr} ${e.title}`);
+  const seen = photo ? todo.filter(byPicture) : [];
+  if (seen.length) await judgeByPhoto(e, seen, language, grade, photo!).catch(() => undefined);
   // Fast pass without the text (conjugation, spelling, vocabulary)…
-  await judgeOpen(e, todo, language, grade, '');
+  const textOnly = todo.filter((l) => l.status === 'open' && !seen.includes(l));
+  if (textOnly.length) await judgeOpen(e, textOnly, language, grade, '');
   // …then the items that need the story, with the printed text of the page (read once per page, then cached).
-  const needText = todo.filter((l) => l.status === 'open');
+  const needText = todo.filter((l) => l.status === 'open' && !seen.includes(l));
   if (needText.length && pageText) {
     textPromise ??= pageText().catch(() => '');
     const text = await textPromise;
     if (text.trim()) await judgeOpen(e, needText, language, grade, text);
   }
+  // …and the items that need the picture (« Quelle heure est-il ? », count the objects, which drawing…).
+  const needPhoto = todo.filter((l) => l.status === 'open' && !seen.includes(l));
+  if (needPhoto.length && photo) await judgeByPhoto(e, needPhoto, language, grade, photo).catch(() => undefined);
   return lines;
+}
+
+/** Items whose right answer is in a picture of the exercise (a clock, things to count): one look at the exercise. */
+async function judgeByPhoto(e: PageExercise, todo: Line[], language: Lang, grade: string, photo: () => Promise<string>): Promise<void> {
+  const full = await photo();
+  const crop = e.r ? cropB64(full, e.r) : null;
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}` },
+    body: JSON.stringify({
+      model: READ_MODEL,
+      reasoning_effort: 'medium',
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Homework of a child in ${grade}, one exercise (photo below). ${exerciseBrief(e)}
+Items and what she answered (already read from her handwriting):
+${todo.map((l, i) => `${i}. ${l.q}  ->  she answered: "${l.a}"`).join('\n')}
+Find the right answer of each item by LOOKING at the pictures of this exercise (read a clock: the short hand gives the
+hour; count the objects one by one; look at the drawing). x = the right answer, short; ok = true if her answer is right,
+false if wrong, null if the answer depends on something that is NOT on the photo (an audio track to listen to, a story
+read in class, another activity or page) or really cannot be seen.
+When ok is false: h = ONE short kind hint in ${SPEAKING_STYLE[language]} (max 16 words) that helps her look again
+(e.g. « Regarde où est la petite aiguille »). Never give the answer in h.
+Return JSON only: {"r":[{"i":0,"ok":true,"x":"...","h":""}]}`,
+            },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${crop?.b64 ?? full}`, detail: 'high' } },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) return;
+  let parsed: { r?: { i?: number; ok?: boolean | null; x?: string; h?: string }[] } = {};
+  try {
+    parsed = JSON.parse((await res.json()).choices[0].message.content);
+  } catch {
+    return;
+  }
+  for (const r of parsed.r ?? []) {
+    const l = typeof r.i === 'number' ? todo[r.i] : undefined;
+    if (!l || typeof r.ok !== 'boolean') continue;
+    l.status = r.ok ? 'right' : 'wrong';
+    if (r.x) l.expected = String(r.x).slice(0, 80);
+    if (!r.ok && r.h) l.hn = String(r.h).slice(0, 200);
+  }
 }
 
 async function judgeOpen(e: PageExercise, todo: Line[], language: Lang, grade: string, text: string): Promise<void> {
@@ -285,7 +360,10 @@ function contains(text: string, answer: string): boolean {
 /** One short hint for a wrong answer: the reading's own hint when it is safe, else a small text-only call. */
 export async function hintFor(l: Line, language: Lang, grade: string): Promise<string | null> {
   const expected = l.copy ? '' : (l.expected ?? '');
-  const leaks = (h: string) => expected !== '' && contains(h, expected);
+  // A choice between printed options (« grande | petite »): naming the other option gives the answer away.
+  const parts = l.q.includes('|') ? l.q.split('|').map((p) => p.trim()) : [];
+  const options = parts.length ? [parts[0].split(/\s+/).pop() ?? '', ...parts.slice(1)].filter((o) => o && !contains(l.a ?? '', o)) : [];
+  const leaks = (h: string) => (expected !== '' && contains(h, expected)) || options.some((o) => contains(h, o));
   const slip = ownCalculationSlip(l.a ?? '');
   if (l.hn && !l.copy && !slip && !leaks(l.hn)) return l.hn;
   const slipNote = slip
@@ -307,7 +385,13 @@ export async function guideQuestion(e: PageExercise, open: Line[], language: Lan
 Item: "${item?.q ?? ''}". You cannot be sure of her answer from the photo, so you do NOT judge it.
 Write ONE or TWO short sentences in ${SPEAKING_STYLE[language]}: one concrete step that fits THIS exercise and THIS item
 (read the instruction: conjugate, count, complete a word…), then ask her to say her answer or type it. Never give the
-answer. Never talk about anything that is not in this item. No emojis. Reply with the text only.`,
+answer. Never talk about anything that is not in this item. No emojis. Reply with the text only.
+Something NOT on the photo (« Listen… » with an audio track, a story read in class, « Look at activity 2 » on another
+page): say kindly that you cannot hear or see it, and ask her to tell you what she heard or remembers, or to show you
+that page.
+A DICTATION: you do not know the sentences that were dictated, so never say a word is right or wrong. Praise her work,
+remind her to check the capital letter at the start and the full stop at the end, and ask her to read her lines to the
+grown-up who dictated them, who will check the words.`,
     300,
     'low',
   );
@@ -343,6 +427,11 @@ ok = true if her answer is right, false if wrong, null if she answered nothing.
 say = 1 to 3 short sentences in ${SPEAKING_STYLE[language]}: explain how to find the right answer of her FIRST wrong item
 (or of the first item if none is wrong), with the steps, so she understands. Here you MAY say the answer.
 Read the numbers of the statement carefully, digit by digit (46 is not 45).
+A blank to complete (« ?plier »): x = only the missing letters ("re"), as she must write them on the blank. In a table,
+follow the pattern of the printed example row EXACTLY: a blank in the same column as « regonfler » takes « re », in the
+column of « dégonfler » it takes « dé ». Never give two possible answers.
+Copying a model (Recopier …): x = the model; say = tell her to copy it carefully, letter by letter, with its accents and signs.
+Never say she wrote or did something when she answered (nothing).
 Return JSON only: {"r":[{"i":0,${noItems ? '"q":"...",' : ''}"x":"...","ok":true}],"say":"..."}`,
     2500,
     'medium',

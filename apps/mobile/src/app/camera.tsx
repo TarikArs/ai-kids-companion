@@ -13,7 +13,7 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { useKeepAwake } from 'expo-keep-awake';
+import { useStayAwake } from '@/lib/keep-awake';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -129,7 +129,7 @@ async function fileToBase64(uri: string): Promise<{ b64: string; mime: string; b
 type TalkState = 'idle' | 'recording' | 'thinking';
 
 export default function Camera() {
-  useKeepAwake();
+  useStayAwake();
   const device = useAppStore((s) => s.device);
   const setDevice = useAppStore((s) => s.setDevice);
   const setRole = useAppStore((s) => s.setRole);

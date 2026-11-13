@@ -21,6 +21,10 @@ import { logTurn, makeLog } from '../_shared/log.ts';
 import { signal } from '../_shared/signals.ts';
 import { DEFAULT_HINT_LANG, pageOf, READ_EFFORT, READ_MODEL, readPage, type PageContext, type PageExercise } from '../_shared/page.ts';
 import { admin, getCaller, isHouseholdMember } from '../_shared/supabase.ts';
+import { zoomExercise } from '../_shared/zoom.ts';
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+const inBackground = (p: Promise<unknown>) => (typeof EdgeRuntime !== 'undefined' ? EdgeRuntime.waitUntil(p) : p);
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -56,7 +60,9 @@ Deno.serve(async (req) => {
   if (!snap) return json({ error: 'Snapshot not found' }, 404);
   const [allowed, { data: session }] = await Promise.all([
     isHouseholdMember(user.id, snap.household_id),
-    admin.from('homework_sessions').select('rotation, children(name, tutor_language, grade)').eq('id', snap.session_id).maybeSingle(),
+    // '*': a column missing in the database (a migration not run yet) must not make the whole row, and the child's
+    // language and name, disappear (Silia then spoke English on one turn and French on the next).
+    admin.from('homework_sessions').select('*, children(name, tutor_language, grade)').eq('id', snap.session_id).maybeSingle(),
   ]);
   if (!allowed) return json({ error: 'Not allowed' }, 403);
   const child = session?.children as { name?: string; tutor_language?: string; grade?: number } | null;
@@ -166,6 +172,22 @@ Deno.serve(async (req) => {
     // After « Exercice similaire »: is this photo her work on that practice? Then it is checked against its answers.
     const outcome = (usable ? await checkPractice(c) : null) ?? (await execute(c, decision, 'tap'));
     lap('answer_ms');
+    // Several exercises and she must choose: while she reads the list, every exercise is read again from its zoom
+    // (zoom.ts) and saved, so the correction after her choice does not wait for it (it took up to 30 s).
+    if (outcome.done === 'ask_which') {
+      inBackground(
+        (async () => {
+          const zoomed = await Promise.all(page.exercises.map((e) => zoomExercise(e, async () => b64, grade, log)));
+          if (zoomed.every((z, i) => z === page.exercises[i])) return;
+          // Saved only if no other request changed the reading meanwhile (a tap already zoomed one exercise).
+          const { data: now } = await admin.from('snapshots').select('exercises').eq('id', snap.id).maybeSingle();
+          const current = ((now as { exercises?: PageContext } | null)?.exercises ?? page) as PageContext;
+          const merged = { ...current, exercises: current.exercises.map((e) => (e.z ? e : (zoomed.find((z) => z.n === e.n) ?? e))) };
+          await admin.from('snapshots').update({ exercises: merged }).eq('id', snap.id);
+          log('zoom prewarm', { exercises: zoomed.filter((z) => z.z).map((z) => z.n) });
+        })().catch((err) => log('zoom prewarm failed', (err as Error).message)),
+      );
+    }
 
     const ms = Date.now() - started;
     logTurn({
